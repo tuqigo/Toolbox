@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>设置</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: var(--bg, #ffffff);
+            color: var(--fg, #333);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .settings-container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* 左侧菜单 */
+        .sidebar {
+            width: 240px;
+            background: var(--sidebar-bg, #f8f9fa);
+            border-right: 1px solid var(--border, #e1e5e9);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border, #e1e5e9);
+        }
+
+        .sidebar-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--fg, #333);
+        }
+
+        .sidebar-menu {
+            flex: 1;
+            padding: 8px 0;
+        }
+
+        .menu-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+            color: var(--text-muted, #666);
+            font-size: 14px;
+        }
+
+        .menu-item:hover {
+            background: var(--hover, rgba(0,0,0,0.05));
+            color: var(--fg, #333);
+        }
+
+        .menu-item.active {
+            background: var(--primary-bg, #007AFF);
+            color: white;
+        }
+
+        .menu-item-icon {
+            margin-right: 12px;
+            font-size: 16px;
+            width: 20px;
+            text-align: center;
+        }
+
+        /* 右侧内容区 */
+        .content-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .content-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border, #e1e5e9);
+            background: var(--panel, white);
+        }
+
+        .content-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--fg, #333);
+            margin-bottom: 4px;
+        }
+
+        .content-description {
+            font-size: 14px;
+            color: var(--text-muted, #666);
+        }
+
+        .content-body {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            background: var(--panel, white);
+        }
+
+        /* 配置组 */
+        .config-section {
+            margin-bottom: 32px;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--fg, #333);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .config-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 0;
+            border-bottom: 1px solid var(--border-light, #f0f0f0);
+        }
+
+        .config-item:last-child {
+            border-bottom: none;
+        }
+
+        .config-label {
+            flex: 1;
+        }
+
+        .config-name {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--fg, #333);
+            margin-bottom: 4px;
+        }
+
+        .config-desc {
+            font-size: 13px;
+            color: var(--text-muted, #666);
+            line-height: 1.4;
+        }
+
+        .config-control {
+            margin-left: 20px;
+        }
+
+        /* 控件样式 */
+        .toggle-switch {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            background: var(--border, #ddd);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .toggle-switch.active {
+            background: #007AFF;
+        }
+
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            top: 2px;
+            left: 2px;
+            transition: all 0.3s ease;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+
+        .toggle-switch.active::after {
+            left: 22px;
+        }
+
+        .select-control {
+            padding: 8px 12px;
+            border: 1px solid var(--border, #ddd);
+            border-radius: 6px;
+            background: var(--panel, white);
+            color: var(--fg, #333);
+            min-width: 120px;
+            font-size: 14px;
+        }
+
+        .number-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .number-input {
+            width: 80px;
+            padding: 8px 12px;
+            border: 1px solid var(--border, #ddd);
+            border-radius: 6px;
+            background: var(--panel, white);
+            color: var(--fg, #333);
+            text-align: center;
+            font-size: 14px;
+        }
+
+        .range-control {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 200px;
+        }
+
+        .range-input {
+            flex: 1;
+            height: 4px;
+            border-radius: 2px;
+            background: var(--border, #ddd);
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .range-input::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #007AFF;
+            cursor: pointer;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+
+        .range-value {
+            font-size: 13px;
+            color: var(--text-muted, #666);
+            min-width: 40px;
+            text-align: center;
+        }
+
+        /* 通知消息 */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            max-width: 300px;
+            z-index: 1000;
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .notification.show {
+            transform: translateX(0);
+        }
+
+        .notification.success {
+            background: #10b981;
+            color: white;
+        }
+
+        .notification.error {
+            background: #ef4444;
+            color: white;
+        }
+
+        /* 隐藏的内容面板 */
+        .content-panel {
+            display: none;
+        }
+
+        .content-panel.active {
+            display: block;
+        }
+
+        /* 操作按钮区域 */
+        .action-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-light, #f0f0f0);
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: 1px solid var(--border, #ddd);
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: var(--panel, white);
+            color: var(--fg, #333);
+        }
+
+        .btn:hover {
+            background: var(--hover, rgba(0,0,0,0.05));
+        }
+
+        .btn-primary {
+            background: #007AFF;
+            color: white;
+            border-color: #007AFF;
+        }
+
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+            border-color: #ef4444;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 200px;
+            }
+            
+            .content-body {
+                padding: 16px;
+            }
+            
+            .config-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+            }
+            
+            .config-control {
+                margin-left: 0;
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="settings-container">
+        <!-- 左侧菜单 -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-title">设置</div>
+            </div>
+            <div class="sidebar-menu">
+                <button class="menu-item active" data-panel="ui">
+                    <span class="menu-item-icon">🎨</span>
+                    外观
+                </button>
+                <button class="menu-item" data-panel="clipboard">
+                    <span class="menu-item-icon">📋</span>
+                    剪贴板
+                </button>
+                <button class="menu-item" data-panel="plugins">
+                    <span class="menu-item-icon">🔌</span>
+                    插件
+                </button>
+                <button class="menu-item" data-panel="shortcuts">
+                    <span class="menu-item-icon">⌨️</span>
+                    快捷键
+                </button>
+                <button class="menu-item" data-panel="advanced">
+                    <span class="menu-item-icon">🔧</span>
+                    高级
+                </button>
+            </div>
+        </div>
+
+        <!-- 右侧内容区 -->
+        <div class="content-area">
+            <div class="content-header">
+                <div class="content-title" id="contentTitle">外观</div>
+                <div class="content-description" id="contentDesc">自定义应用的外观和主题设置</div>
+            </div>
+            
+            <div class="content-body">
+                <!-- 外观设置 -->
+                <div class="content-panel active" id="panel-ui">
+                    <div class="config-section">
+                        <div class="section-title">🎨 主题设置</div>
+                        
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">主题</div>
+                                <div class="config-desc">选择应用的外观主题</div>
+                            </div>
+                            <div class="config-control">
+                                <select class="select-control" id="theme">
+                                    <option value="system">跟随系统</option>
+                                    <option value="light">明亮</option>
+                                    <option value="dark">暗黑</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">标题栏高度</div>
+                                <div class="config-desc">调整窗口标题栏的高度</div>
+                            </div>
+                            <div class="config-control">
+                                <select class="select-control" id="titlebarHeight">
+                                    <option value="32">32px</option>
+                                    <option value="40">40px</option>
+                                    <option value="48">48px</option>
+                                    <option value="56">56px</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">窗口透明度</div>
+                                <div class="config-desc">调整窗口的透明度</div>
+                            </div>
+                            <div class="config-control">
+                                <div class="range-control">
+                                    <input type="range" class="range-input" id="windowOpacity" min="0.8" max="1.0" step="0.05">
+                                    <span class="range-value" id="opacityValue">95%</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">字体大小</div>
+                                <div class="config-desc">调整界面文字大小</div>
+                            </div>
+                            <div class="config-control">
+                                <select class="select-control" id="fontSize">
+                                    <option value="small">小</option>
+                                    <option value="medium">中</option>
+                                    <option value="large">大</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">动画效果</div>
+                                <div class="config-desc">启用界面动画和过渡效果</div>
+                            </div>
+                            <div class="config-control">
+                                <div class="toggle-switch" id="animations"></div>
+                            </div>
+                        </div>
+
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">紧凑模式</div>
+                                <div class="config-desc">减少界面元素间距，显示更多内容</div>
+                            </div>
+                            <div class="config-control">
+                                <div class="toggle-switch" id="compactMode"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 剪贴板设置 -->
+                <div class="content-panel" id="panel-clipboard">
+                    <div class="config-section">
+                        <div class="section-title">📋 剪贴板功能</div>
+                        
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">自动填充</div>
+                                <div class="config-desc">启动时自动填充最近的剪贴板内容</div>
+                            </div>
+                            <div class="config-control">
+                                <div class="toggle-switch" id="clipboardEnabled"></div>
+                            </div>
+                        </div>
+
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">有效时间</div>
+                                <div class="config-desc">剪贴板内容被视为"最近"的时间限制</div>
+                            </div>
+                            <div class="config-control">
+                                <select class="select-control" id="clipboardMaxAge">
+                                    <option value="3">3秒</option>
+                                    <option value="5">5秒</option>
+                                    <option value="10">10秒</option>
+                                    <option value="30">30秒</option>
+                                    <option value="60">1分钟</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">最大历史记录</div>
+                                <div class="config-desc">保存的剪贴板历史记录数量</div>
+                            </div>
+                            <div class="config-control">
+                                <div class="number-control">
+                                    <input type="number" class="number-input" id="clipboardMaxHistory" min="50" max="2000" step="50">
+                                    <span>条</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 插件设置 -->
+                <div class="content-panel" id="panel-plugins">
+                    <div class="config-section">
+                        <div class="section-title">🔌 插件管理</div>
+                        
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">自动重载</div>
+                                <div class="config-desc">检测到插件文件变化时自动重新加载</div>
+                            </div>
+                            <div class="config-control">
+                                <div class="toggle-switch" id="pluginAutoReload"></div>
+                            </div>
+                        </div>
+
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">最大搜索结果</div>
+                                <div class="config-desc">搜索时显示的最大插件数量</div>
+                            </div>
+                            <div class="config-control">
+                                <div class="number-control">
+                                    <input type="number" class="number-input" id="pluginMaxResults" min="5" max="50" step="1">
+                                    <span>个</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">启用无UI插件</div>
+                                <div class="config-desc">允许加载和执行无界面的后台插件</div>
+                            </div>
+                            <div class="config-control">
+                                <div class="toggle-switch" id="pluginEnableHeadless"></div>
+                            </div>
+                        </div>
+
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">显示功能代码</div>
+                                <div class="config-desc">在搜索结果中显示插件的功能代码</div>
+                            </div>
+                            <div class="config-control">
+                                <div class="toggle-switch" id="pluginShowFeatureCodes"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 快捷键设置 -->
+                <div class="content-panel" id="panel-shortcuts">
+                    <div class="config-section">
+                        <div class="section-title">⌨️ 键盘快捷键</div>
+                        
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">主窗口快捷键</div>
+                                <div class="config-desc">唤起主输入窗口的全局快捷键</div>
+                            </div>
+                            <div class="config-control">
+                                <input type="text" class="select-control" id="shortcutMainWindow" readonly 
+                                       placeholder="点击设置快捷键" style="cursor: pointer;">
+                            </div>
+                        </div>
+
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">隐藏窗口</div>
+                                <div class="config-desc">隐藏当前窗口的快捷键</div>
+                            </div>
+                            <div class="config-control">
+                                <input type="text" class="select-control" id="shortcutHideWindow" readonly>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 高级设置 -->
+                <div class="content-panel" id="panel-advanced">
+                    <div class="config-section">
+                        <div class="section-title">🔧 高级选项</div>
+                        
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">搜索防抖延迟</div>
+                                <div class="config-desc">输入后延迟多久开始搜索 (毫秒)</div>
+                            </div>
+                            <div class="config-control">
+                                <div class="number-control">
+                                    <input type="number" class="number-input" id="performanceDebounceDelay" min="50" max="500" step="50">
+                                    <span>ms</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">缓存搜索结果</div>
+                                <div class="config-desc">缓存搜索结果以提高性能</div>
+                            </div>
+                            <div class="config-control">
+                                <div class="toggle-switch" id="performanceCacheResults"></div>
+                            </div>
+                        </div>
+
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">详细日志</div>
+                                <div class="config-desc">启用详细的调试日志输出</div>
+                            </div>
+                            <div class="config-control">
+                                <div class="toggle-switch" id="performanceEnableLogging"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="config-section">
+                        <div class="section-title">💾 配置管理</div>
+                        
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">导入/导出配置</div>
+                                <div class="config-desc">备份或恢复您的设置配置</div>
+                            </div>
+                            <div class="config-control">
+                                <div class="action-buttons">
+                                    <button class="btn" id="exportConfig">📤 导出</button>
+                                    <button class="btn" id="importConfig">📥 导入</button>
+                                    <input type="file" class="file-input" id="configFile" accept=".json">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="config-item">
+                            <div class="config-label">
+                                <div class="config-name">重置设置</div>
+                                <div class="config-desc">将所有设置恢复为默认值</div>
+                            </div>
+                            <div class="config-control">
+                                <button class="btn btn-danger" id="resetConfig">🔄 重置</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通知消息 -->
+    <div class="notification" id="notification"></div>
+
+    <script src="script.js"></script>
+</body>
+</html>

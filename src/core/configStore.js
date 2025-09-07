@@ -26,15 +26,50 @@ class ConfigStore {
         centerOnShow: true // 显示时居中
       },
       
+      // UI界面配置
+      ui: {
+        theme: 'system',           // 主题: 'system' | 'light' | 'dark'
+        titlebarHeight: 48,        // 标题栏高度(px): 32, 40, 48, 56
+        windowOpacity: 0.95,       // 窗口透明度: 0.8-1.0
+        accentColor: '#007AFF',    // 主色调
+        fontSize: 'medium',        // 字体大小: 'small' | 'medium' | 'large'
+        animations: true,          // 是否启用动画效果
+        compactMode: false,        // 紧凑模式
+        showTypeIndicator: false   // 是否显示内容类型指示器
+      },
+      
       // 插件相关配置
       plugins: {
         autoReload: false, // 是否自动重载插件
-        maxResults: 10     // 最大搜索结果数量
+        maxResults: 10,    // 最大搜索结果数量
+        enableHeadless: true, // 是否启用无UI插件
+        showFeatureCodes: false // 是否显示功能代码
       },
       
       // 快捷键配置
       shortcuts: {
-        mainWindow: 'Alt+Space' // 主窗口快捷键
+        mainWindow: 'Ctrl+Space',  // 主窗口快捷键
+        hideWindow: 'Escape',      // 隐藏窗口
+        nextResult: 'ArrowDown',   // 下一个结果
+        prevResult: 'ArrowUp',     // 上一个结果
+        executePlugin: 'Enter'     // 执行插件
+      },
+
+      // 搜索配置
+      search: {
+        instantSearch: true,       // 即时搜索
+        searchHistory: true,       // 保存搜索历史
+        maxHistoryItems: 100,      // 最大历史记录数
+        fuzzyMatch: true,          // 模糊匹配
+        caseSensitive: false       // 大小写敏感
+      },
+
+      // 性能配置
+      performance: {
+        debounceDelay: 150,        // 搜索防抖延迟(ms)
+        maxConcurrentPlugins: 5,   // 最大并发插件数
+        cacheResults: true,        // 缓存搜索结果
+        enableLogging: false       // 启用详细日志
       }
     };
   }
@@ -141,6 +176,140 @@ class ConfigStore {
     const current = this.get('clipboard.enabled', true);
     await this.set('clipboard.enabled', !current);
     return !current;
+  }
+
+  // 获取UI配置
+  getUIConfig() {
+    return {
+      theme: this.get('ui.theme', 'system'),
+      titlebarHeight: this.get('ui.titlebarHeight', 48),
+      windowOpacity: this.get('ui.windowOpacity', 0.95),
+      accentColor: this.get('ui.accentColor', '#007AFF'),
+      fontSize: this.get('ui.fontSize', 'medium'),
+      animations: this.get('ui.animations', true),
+      compactMode: this.get('ui.compactMode', false),
+      showTypeIndicator: this.get('ui.showTypeIndicator', false)
+    };
+  }
+
+  // 设置主题
+  async setTheme(theme) {
+    const validThemes = ['system', 'light', 'dark'];
+    if (validThemes.includes(theme)) {
+      await this.set('ui.theme', theme);
+      return theme;
+    }
+    return this.get('ui.theme', 'system');
+  }
+
+  // 设置标题栏高度
+  async setTitlebarHeight(height) {
+    const validHeights = [32, 40, 48, 56];
+    if (validHeights.includes(height)) {
+      await this.set('ui.titlebarHeight', height);
+      return height;
+    }
+    return this.get('ui.titlebarHeight', 48);
+  }
+
+  // 设置窗口透明度
+  async setWindowOpacity(opacity) {
+    const validOpacity = Math.max(0.8, Math.min(1.0, opacity));
+    await this.set('ui.windowOpacity', validOpacity);
+    return validOpacity;
+  }
+
+  // 设置字体大小
+  async setFontSize(size) {
+    const validSizes = ['small', 'medium', 'large'];
+    if (validSizes.includes(size)) {
+      await this.set('ui.fontSize', size);
+      return size;
+    }
+    return this.get('ui.fontSize', 'medium');
+  }
+
+  // 切换动画效果
+  async toggleAnimations() {
+    const current = this.get('ui.animations', true);
+    await this.set('ui.animations', !current);
+    return !current;
+  }
+
+  // 切换紧凑模式
+  async toggleCompactMode() {
+    const current = this.get('ui.compactMode', false);
+    await this.set('ui.compactMode', !current);
+    return !current;
+  }
+
+  // 获取插件配置
+  getPluginConfig() {
+    return {
+      autoReload: this.get('plugins.autoReload', false),
+      maxResults: this.get('plugins.maxResults', 10),
+      enableHeadless: this.get('plugins.enableHeadless', true),
+      showFeatureCodes: this.get('plugins.showFeatureCodes', false)
+    };
+  }
+
+  // 获取快捷键配置
+  getShortcutConfig() {
+    return {
+      mainWindow: this.get('shortcuts.mainWindow', 'Ctrl+Space'),
+      hideWindow: this.get('shortcuts.hideWindow', 'Escape'),
+      nextResult: this.get('shortcuts.nextResult', 'ArrowDown'),
+      prevResult: this.get('shortcuts.prevResult', 'ArrowUp'),
+      executePlugin: this.get('shortcuts.executePlugin', 'Enter')
+    };
+  }
+
+  // 获取搜索配置
+  getSearchConfig() {
+    return {
+      instantSearch: this.get('search.instantSearch', true),
+      searchHistory: this.get('search.searchHistory', true),
+      maxHistoryItems: this.get('search.maxHistoryItems', 100),
+      fuzzyMatch: this.get('search.fuzzyMatch', true),
+      caseSensitive: this.get('search.caseSensitive', false)
+    };
+  }
+
+  // 获取性能配置
+  getPerformanceConfig() {
+    return {
+      debounceDelay: this.get('performance.debounceDelay', 150),
+      maxConcurrentPlugins: this.get('performance.maxConcurrentPlugins', 5),
+      cacheResults: this.get('performance.cacheResults', true),
+      enableLogging: this.get('performance.enableLogging', false)
+    };
+  }
+
+  // 重置配置为默认值
+  async resetToDefault() {
+    this.config = this.getDefaultConfig();
+    await this.save();
+    if (!this.isQuiet) {
+      console.log('配置已重置为默认值');
+    }
+  }
+
+  // 导出配置
+  exportConfig() {
+    return JSON.parse(JSON.stringify(this.config));
+  }
+
+  // 导入配置
+  async importConfig(configData) {
+    if (typeof configData === 'object' && configData !== null) {
+      this.config = this.mergeConfig(this.getDefaultConfig(), configData);
+      await this.save();
+      if (!this.isQuiet) {
+        console.log('配置导入成功');
+      }
+      return true;
+    }
+    return false;
   }
 }
 

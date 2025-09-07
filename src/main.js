@@ -37,7 +37,7 @@ class MiniToolbox {
     this.configStore = new ConfigStore({ isQuiet: this.isQuiet });
     this.pluginManager = new PluginManager({ isQuiet: this.isQuiet });
     this.inputAnalyzer = new InputAnalyzer({ isQuiet: this.isQuiet });
-    this.windowManager = new WindowManager({ isQuiet: this.isQuiet, titlebarHeight: 48, defaultTheme: 'system' });
+    this.windowManager = new WindowManager({ isQuiet: this.isQuiet });
     this.clipboardStore = new ClipboardStore({ isQuiet: this.isQuiet, maxItems: 500 });
     this.usageStore = new UsageStore({ isQuiet: this.isQuiet });
     this.matcher = new Matcher({ isQuiet: this.isQuiet, usageStore: this.usageStore });
@@ -86,6 +86,10 @@ class MiniToolbox {
   }
 
   createTray() {
+    this.updateTrayMenu();
+  }
+
+  updateTrayMenu() {
     // 幂等保护，避免重复创建多个托盘图标
     if (this.tray) {
       try { this.tray.destroy(); } catch {}
@@ -107,24 +111,28 @@ class MiniToolbox {
 
     this.tray = new Tray(trayIcon);
     
+    // 从配置中获取当前设置
+    const uiConfig = this.configStore.getUIConfig();
+    const clipboardConfig = this.configStore.getClipboardConfig();
+    
     const contextMenu = Menu.buildFromTemplate([
       { label: '显示输入框', click: () => this.showInputWindow() },
       { label: '重新加载插件', click: () => this.reloadPlugins() },
       { 
         label: '标题栏高度', 
         submenu: [
-          { label: '32px', type: 'radio', checked: (this.windowManager.defaultChromeHeight===32), click: ()=> this.setTitlebarHeight(32) },
-          { label: '40px', type: 'radio', checked: (this.windowManager.defaultChromeHeight===40), click: ()=> this.setTitlebarHeight(40) },
-          { label: '48px', type: 'radio', checked: (this.windowManager.defaultChromeHeight===48), click: ()=> this.setTitlebarHeight(48) },
-          { label: '56px', type: 'radio', checked: (this.windowManager.defaultChromeHeight===56), click: ()=> this.setTitlebarHeight(56) }
+          { label: '32px', type: 'radio', checked: uiConfig.titlebarHeight === 32, click: () => this.setTitlebarHeight(32) },
+          { label: '40px', type: 'radio', checked: uiConfig.titlebarHeight === 40, click: () => this.setTitlebarHeight(40) },
+          { label: '48px', type: 'radio', checked: uiConfig.titlebarHeight === 48, click: () => this.setTitlebarHeight(48) },
+          { label: '56px', type: 'radio', checked: uiConfig.titlebarHeight === 56, click: () => this.setTitlebarHeight(56) }
         ]
       },
       {
         label: '主题',
         submenu: [
-          { label: '跟随系统', type: 'radio', checked: (this.currentTheme==='system' || !this.currentTheme), click: ()=> this.setTheme('system') },
-          { label: '明亮', type: 'radio', checked: (this.currentTheme==='light'), click: ()=> this.setTheme('light') },
-          { label: '暗黑', type: 'radio', checked: (this.currentTheme==='dark'), click: ()=> this.setTheme('dark') }
+          { label: '跟随系统', type: 'radio', checked: uiConfig.theme === 'system', click: () => this.setTheme('system') },
+          { label: '明亮', type: 'radio', checked: uiConfig.theme === 'light', click: () => this.setTheme('light') },
+          { label: '暗黑', type: 'radio', checked: uiConfig.theme === 'dark', click: () => this.setTheme('dark') }
         ]
       },
       { 
@@ -133,32 +141,32 @@ class MiniToolbox {
           { 
             label: '启用自动填充', 
             type: 'checkbox', 
-            checked: this.configStore.get('clipboard.enabled', true),
+            checked: clipboardConfig.enabled,
             click: () => this.toggleClipboardAutoFill()
           },
           { type: 'separator' },
           { 
             label: '有效时间: 3秒', 
             type: 'radio',
-            checked: this.configStore.get('clipboard.autoFillMaxAge', 5) === 3,
+            checked: clipboardConfig.autoFillMaxAge === 3,
             click: () => this.setClipboardMaxAge(3)
           },
           { 
             label: '有效时间: 5秒', 
             type: 'radio',
-            checked: this.configStore.get('clipboard.autoFillMaxAge', 5) === 5,
+            checked: clipboardConfig.autoFillMaxAge === 5,
             click: () => this.setClipboardMaxAge(5)
           },
           { 
             label: '有效时间: 10秒', 
             type: 'radio',
-            checked: this.configStore.get('clipboard.autoFillMaxAge', 5) === 10,
+            checked: clipboardConfig.autoFillMaxAge === 10,
             click: () => this.setClipboardMaxAge(10)
           },
           { 
             label: '有效时间: 30秒', 
             type: 'radio',
-            checked: this.configStore.get('clipboard.autoFillMaxAge', 5) === 30,
+            checked: clipboardConfig.autoFillMaxAge === 30,
             click: () => this.setClipboardMaxAge(30)
           }
         ]
@@ -175,15 +183,16 @@ class MiniToolbox {
       this.showInputWindow();
     });
   }
-  setTitlebarHeight(px) {
+  async setTitlebarHeight(px) {
     try {
       this.windowManager.setDefaultChromeHeight(px);
-      // 可持久化保存到配置中心（如需）：
-      // await this.configStore.set('ui.titlebar.height', px)
+      // 保存到配置文件
+      await this.configStore.setTitlebarHeight(px);
+      this.updateTrayMenu();
     } catch {}
   }
 
-  setTheme(theme) {
+  async setTheme(theme) {
     try {
       const { nativeTheme } = require('electron');
       this.currentTheme = theme; // 'system' | 'light' | 'dark'
@@ -191,47 +200,29 @@ class MiniToolbox {
       if (theme === 'system') {
         effective = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
       }
-      // 主题调色板（可在此按需微调）
-      const palettes = {
-        light: {
-          fg: '#222222',
-          fgMuted: '#666666',
-          panel: '#ffffff',
-          border: 'rgba(0,0,0,0.08)',
-          hover: 'rgba(0,0,0,0.06)',
-          selected: 'rgba(0,122,255,0.12)',
-          iconBg: '#f1f1f3'
-        },
-        dark: {
-          fg: '#e6e7ea',
-          fgMuted: '#a1a1aa',
-          panel: '#2b2d31',
-          border: '#3a3b41',
-          hover: 'rgba(255,255,255,0.06)',
-          selected: 'rgba(0,122,255,0.22)',
-          iconBg: '#3a3b41'
-        }
-      };
-      const palette = palettes[effective] || palettes.light;
-      // 广播给所有视图（标题栏与插件内容）
+      
+      // 设置窗口管理器的主题
       this.windowManager.defaultTheme = theme;
-      this.windowManager.broadcastTheme({ theme, effective, palette });
-      // 广播给主输入窗口
-      try { if (this.mainWindow && !this.mainWindow.isDestroyed()) this.mainWindow.webContents.send('ui-theme', { theme, effective, palette }); } catch {}
+      
+      // 应用主题到所有窗口
+      await this.applyThemeToWindows(theme, effective);
+      
       // 跟随系统时，监听系统主题变化
       try {
         if (!this._nativeThemeHooked) {
           nativeTheme.on('updated', () => {
             if (this.currentTheme === 'system') {
               const eff = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
-              const pll = palettes[eff] || palettes.light;
-              this.windowManager.broadcastTheme({ theme: 'system', effective: eff, palette: pll });
-              try { if (this.mainWindow && !this.mainWindow.isDestroyed()) this.mainWindow.webContents.send('ui-theme', { theme: 'system', effective: eff, palette: pll }); } catch {}
+              this.applyThemeToWindows('system', eff);
             }
           });
           this._nativeThemeHooked = true;
         }
       } catch {}
+      
+      // 保存到配置文件
+      await this.configStore.setTheme(theme);
+      this.updateTrayMenu();
     } catch (e) {
       console.error('设置主题失败:', e && e.message || e);
     }
@@ -272,11 +263,26 @@ class MiniToolbox {
     }
   }
 
-  showInputWindow() {
+  async showInputWindow() {
     if (this.mainWindow) {
       this.mainWindow.show();
       this.mainWindow.center();
       this.mainWindow.focus();
+      
+      // 确保主题正确应用（防止主窗口错过主题消息）
+      try {
+        const uiConfig = this.configStore.getUIConfig();
+        const { nativeTheme } = require('electron');
+        let effective = uiConfig.theme;
+        if (uiConfig.theme === 'system') {
+          effective = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+        }
+        await this.applyThemeToWindows(uiConfig.theme, effective);
+      } catch (error) {
+        if (!this.isQuiet) {
+          console.warn('显示主窗口时应用主题失败:', error);
+        }
+      }
     }
   }
 
@@ -577,7 +583,14 @@ class MiniToolbox {
     ipcMain.handle('mt.secure-call', async (event, { pluginId, channel, payload } = {}) => {
       const pid = pluginId || getPluginIdFromEvent(event);
       const meta = pid && this.pluginManager.get(pid);
-      if (!meta) return { ok: false, error: 'unknown plugin' };
+      
+      // 对于配置API，允许所有插件访问，不进行严格的插件ID验证
+      const isConfigAPI = channel && channel.startsWith('config.');
+      
+      
+      if (!meta && !isConfigAPI) {
+        return { ok: false, error: 'unknown plugin' };
+      }
 
       try {
         switch (channel) {
@@ -654,6 +667,48 @@ class MiniToolbox {
           case 'installer.installFromFile':
             await this.pluginInstaller.installFromFile(payload);
             return { ok: true };
+          case 'config.get':
+            try {
+              const result = payload ? this.configStore.get(payload) : this.configStore.exportConfig();
+              return { ok: true, data: result };
+            } catch (error) {
+              return { ok: false, error: error.message };
+            }
+          case 'config.set':
+            if (payload && payload.path && payload.value !== undefined) {
+              try {
+                await this.configStore.set(payload.path, payload.value);
+                return { ok: true };
+              } catch (error) {
+                return { ok: false, error: error.message };
+              }
+            }
+            return { ok: false, error: 'invalid config set payload' };
+          case 'config.getUI':
+            return { ok: true, data: this.configStore.getUIConfig() };
+          case 'config.setTheme':
+            const theme = await this.configStore.setTheme(payload);
+            await this.setTheme(theme);
+            return { ok: true, data: theme };
+          case 'config.setTitlebarHeight':
+            const height = await this.configStore.setTitlebarHeight(payload);
+            this.windowManager.setDefaultChromeHeight(height);
+            this.updateTrayMenu();
+            return { ok: true, data: height };
+          case 'config.reset':
+            await this.configStore.resetToDefault();
+            await this.applyConfigOnStartup();
+            this.updateTrayMenu();
+            return { ok: true };
+          case 'config.export':
+            return { ok: true, data: this.configStore.exportConfig() };
+          case 'config.import':
+            const result = await this.configStore.importConfig(payload);
+            if (result) {
+              await this.applyConfigOnStartup();
+              this.updateTrayMenu();
+            }
+            return { ok: result };
           default:
             return { ok: false, error: 'unknown channel' };
         }
@@ -933,12 +988,33 @@ class MiniToolbox {
 
   // 全局快捷键
   registerGlobalShortcuts() {
-    const ret = globalShortcut.register('Ctrl+Space', () => {
-      this.showInputWindow();
-    });
+    try {
+      // 从配置中获取快捷键设置
+      const shortcutConfig = this.configStore.getShortcutConfig();
+      const mainWindowShortcut = shortcutConfig.mainWindow || 'Ctrl+Space';
+      
+      const ret = globalShortcut.register(mainWindowShortcut, () => {
+        this.showInputWindow();
+      });
 
-    if (!ret) {
-      console.error('全局快捷键注册失败');
+      if (!ret) {
+        console.error('全局快捷键注册失败:', mainWindowShortcut);
+        // 如果自定义快捷键失败，尝试默认的
+        if (mainWindowShortcut !== 'Ctrl+Space') {
+          const fallback = globalShortcut.register('Ctrl+Space', () => {
+            this.showInputWindow();
+          });
+          if (fallback) {
+            console.log('使用默认快捷键 Ctrl+Space');
+          }
+        }
+      } else {
+        if (!this.isQuiet) {
+          console.log('全局快捷键已注册:', mainWindowShortcut);
+        }
+      }
+    } catch (error) {
+      console.error('注册快捷键时出错:', error);
     }
   }
 
@@ -947,7 +1023,7 @@ class MiniToolbox {
     console.log(`剪贴板自动填充已${newState ? '启用' : '禁用'}`);
     
     // 重新创建托盘菜单以更新选中状态
-    this.createTray();
+    this.updateTrayMenu();
   }
 
   async setClipboardMaxAge(seconds) {
@@ -955,12 +1031,114 @@ class MiniToolbox {
     console.log(`剪贴板有效时间已设置为 ${seconds} 秒`);
     
     // 重新创建托盘菜单以更新选中状态
-    this.createTray();
+    this.updateTrayMenu();
   }
 
-  openSettings() {
-    // TODO: 实现设置界面
-    console.log('打开设置界面');
+  // 在启动时应用配置文件中的设置
+  async applyConfigOnStartup() {
+    try {
+      const uiConfig = this.configStore.getUIConfig();
+      
+      // 应用主题设置（不保存，只应用）
+      this.currentTheme = uiConfig.theme;
+      const { nativeTheme } = require('electron');
+      let effective = uiConfig.theme;
+      if (uiConfig.theme === 'system') {
+        effective = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+      }
+      
+      // 设置窗口管理器的主题和标题栏高度
+      this.windowManager.defaultTheme = uiConfig.theme;
+      this.windowManager.setDefaultChromeHeight(uiConfig.titlebarHeight);
+      
+      // 应用主题到所有窗口（包括主窗口）
+      await this.applyThemeToWindows(uiConfig.theme, effective);
+      
+      if (!this.isQuiet) {
+        console.log('已应用配置:', {
+          theme: uiConfig.theme,
+          effective: effective,
+          titlebarHeight: uiConfig.titlebarHeight,
+          windowOpacity: uiConfig.windowOpacity
+        });
+      }
+    } catch (error) {
+      if (!this.isQuiet) {
+        console.warn('应用配置时出错:', error.message);
+      }
+    }
+  }
+
+  // 应用主题到所有窗口
+  async applyThemeToWindows(theme, effective) {
+    try {
+      // 主题调色板
+      const palettes = {
+        light: {
+          fg: '#222222',
+          fgMuted: '#666666',
+          panel: '#ffffff',
+          border: 'rgba(0,0,0,0.08)',
+          hover: 'rgba(0,0,0,0.06)',
+          selected: 'rgba(0,122,255,0.12)',
+          iconBg: '#f1f1f3'
+        },
+        dark: {
+          fg: '#e6e7ea',
+          fgMuted: '#a1a1aa',
+          panel: '#2b2d31',
+          border: '#3a3b41',
+          hover: 'rgba(255,255,255,0.06)',
+          selected: 'rgba(0,122,255,0.22)',
+          iconBg: '#3a3b41'
+        }
+      };
+      
+      const palette = palettes[effective] || palettes.light;
+      const themeData = { theme, effective, palette };
+      
+      // 广播给插件窗口
+      this.windowManager.broadcastTheme(themeData);
+      
+      // 发送给主输入窗口
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send('ui-theme', themeData);
+      } else {
+        if (!this.isQuiet) {
+          console.log('主窗口未准备好，无法发送主题');
+        }
+      }
+      
+    } catch (error) {
+      if (!this.isQuiet) {
+        console.error('应用主题失败:', error);
+      }
+    }
+  }
+
+  async openSettings() {
+    try {
+      // 查找设置插件
+      const settingsPlugin = this.pluginManager.get('settings');
+      if (settingsPlugin) {
+        // 创建虚拟输入数据
+        const inputData = {
+          content: '设置',
+          type: 'text',
+          length: 2,
+          lines: 1,
+          timestamp: Date.now(),
+          featureCode: 'settings.open'
+        };
+        
+        // 执行设置插件
+        await this.executePlugin('settings', inputData);
+      } else {
+        console.warn('未找到设置插件');
+      }
+    } catch (error) {
+      console.error('打开设置界面失败:', error);
+    }
   }
 
   async init() {
@@ -998,12 +1176,17 @@ class MiniToolbox {
       await this.configStore.load();
       await this.usageStore.load();
       await this.clipboardStore.load();
+      
       this.createTray();
       this.createMainWindow();
       this.registerGlobalShortcuts();
       await this.loadPlugins();
       this.matcher.rebuild(this.pluginManager.list());
       this.setupIpcHandlers();
+      
+      // 在主窗口创建后应用配置中的设置
+      await this.applyConfigOnStartup();
+      
       this.startClipboardMonitoring();
       
       if (!this.isQuiet) {

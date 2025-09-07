@@ -37,7 +37,9 @@ class MiniToolboxRenderer {
 
     // 监听主题变化，应用到主输入框
     try {
-      ipcRenderer.on('ui-theme', (_e, payload) => this.applyTheme(payload));
+      ipcRenderer.on('ui-theme', (_e, payload) => {
+        this.applyTheme(payload);
+      });
     } catch {}
   }
 

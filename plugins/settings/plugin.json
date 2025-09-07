@@ -1,0 +1,30 @@
+{
+  "id": "settings",
+  "name": "设置管理",
+  "description": "管理 MiniToolbox 的各项配置设置",
+  "version": "1.0.0",
+  "author": "MiniToolbox Team",
+  "icon": "⚙️",
+  "ui": true,
+  "window": {
+    "width": 800,
+    "height": 600,
+    "resizable": true,
+    "center": true
+  },
+  "permissions": ["config"],
+  "features": [
+    {
+      "code": "settings.open",
+      "explain": "打开设置界面",
+      "cmds": [
+        { "type": "keyword", "value": "设置" },
+        { "type": "keyword", "value": "配置" },
+        { "type": "keyword", "value": "settings" },
+        { "type": "keyword", "value": "config" },
+        { "type": "prefix", "value": "设置 " },
+        { "type": "prefix", "value": "配置 " }
+      ]
+    }
+  ]
+}
