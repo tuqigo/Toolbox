@@ -2,6 +2,7 @@ class SettingsManager {
     constructor() {
         this.config = {};
         this.currentPanel = 'ui';
+        this.recordingShortcut = null;
         this.init();
     }
 
@@ -19,7 +20,6 @@ class SettingsManager {
             this.config = configData || {};
         } catch (error) {
             console.error('配置加载失败:', error);
-            this.showNotification('配置加载失败: ' + error.message, 'error');
             // 使用默认配置
             this.config = {
                 ui: { theme: 'system', titlebarHeight: 48, windowOpacity: 0.95 },
@@ -128,6 +128,12 @@ class SettingsManager {
         
         // 文件选择
         document.getElementById('configFile')?.addEventListener('change', (e) => this.handleFileImport(e));
+
+        // 快捷键设置
+        document.querySelectorAll('.shortcut-input').forEach(input => {
+            input.addEventListener('click', () => this.startRecordingShortcut(input));
+            input.addEventListener('blur', () => this.stopRecordingShortcut());
+        });
     }
 
     // 切换面板
@@ -185,7 +191,6 @@ class SettingsManager {
             
         } catch (error) {
             console.error('配置保存失败:', error);
-            this.showNotification('保存失败: ' + error.message, 'error');
         }
     }
 
@@ -227,11 +232,9 @@ class SettingsManager {
     async saveConfig(configData) {
         try {
             await window.MT.invoke('config.import', configData);
-            this.showNotification('配置已保存', 'success');
             return true;
         } catch (error) {
             console.error('配置保存失败:', error);
-            this.showNotification('保存失败: ' + error.message, 'error');
             return false;
         }
     }
@@ -252,9 +255,8 @@ class SettingsManager {
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
             
-            this.showNotification('配置已导出', 'success');
         } catch (error) {
-            this.showNotification('导出失败: ' + error.message, 'error');
+            console.error('导出失败:', error);
         }
     }
 
@@ -275,9 +277,8 @@ class SettingsManager {
             await window.MT.invoke('config.import', configData);
             await this.loadConfig();
             this.updateUI();
-            this.showNotification('配置导入成功', 'success');
         } catch (error) {
-            this.showNotification('导入失败: ' + error.message, 'error');
+            console.error('导入失败:', error);
         }
         
         // 清空文件选择
@@ -294,27 +295,89 @@ class SettingsManager {
             await window.MT.invoke('config.reset');
             await this.loadConfig();
             this.updateUI();
-            this.showNotification('配置已重置', 'success');
         } catch (error) {
-            this.showNotification('重置失败: ' + error.message, 'error');
+            console.error('重置失败:', error);
         }
     }
 
-    // 显示通知消息
-    showNotification(message, type = 'success') {
-        const notification = document.getElementById('notification');
-        if (!notification) return;
+    // 开始录制快捷键
+    startRecordingShortcut(input) {
+        if (this.recordingShortcut) return;
+        
+        this.recordingShortcut = input;
+        input.classList.add('recording');
+        input.value = '按下快捷键...';
+        input.focus();
 
-        notification.textContent = message;
-        notification.className = `notification ${type}`;
+        // 添加键盘事件监听
+        this.handleShortcutKeydown = (e) => this.onShortcutKeydown(e);
+        document.addEventListener('keydown', this.handleShortcutKeydown, true);
+    }
+
+    // 停止录制快捷键
+    stopRecordingShortcut() {
+        if (!this.recordingShortcut) return;
         
-        // 显示通知
-        setTimeout(() => notification.classList.add('show'), 10);
+        this.recordingShortcut.classList.remove('recording');
+        if (this.recordingShortcut.value === '按下快捷键...') {
+            // 恢复原值
+            const id = this.recordingShortcut.id;
+            if (id === 'shortcutMainWindow') {
+                this.recordingShortcut.value = this.config.shortcuts?.mainWindow || 'Ctrl+Space';
+            } else if (id === 'shortcutHideWindow') {
+                this.recordingShortcut.value = this.config.shortcuts?.hideWindow || 'Escape';
+            }
+        }
         
-        // 3秒后隐藏
-        setTimeout(() => {
-            notification.classList.remove('show');
-        }, 3000);
+        this.recordingShortcut = null;
+        document.removeEventListener('keydown', this.handleShortcutKeydown, true);
+
+        // 无需通知主进程
+    }
+
+    // 处理快捷键按下
+    onShortcutKeydown(e) {
+        if (!this.recordingShortcut) return;
+        
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // 黑名单：直接拦截系统菜单组合（Alt+Space）、F10、Alt 键单独
+        if ((e.altKey && (e.key === ' ' || e.code === 'Space')) || e.key === 'F10' || (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && (e.key === 'Alt' || e.code === 'AltLeft' || e.code === 'AltRight'))) {
+            // 什么也不做，只是阻止默认
+            return;
+        }
+
+        const keys = [];
+        if (e.ctrlKey) keys.push('Ctrl');
+        if (e.altKey) keys.push('Alt');
+        if (e.shiftKey) keys.push('Shift');
+        if (e.metaKey) keys.push('Meta');
+        
+        // 添加主键
+        const key = e.key;
+        if (key && key !== 'Control' && key !== 'Alt' && key !== 'Shift' && key !== 'Meta') {
+            // 特殊键名转换
+            const keyMap = {
+                ' ': 'Space',
+                'ArrowUp': 'Up',
+                'ArrowDown': 'Down',
+                'ArrowLeft': 'Left',
+                'ArrowRight': 'Right'
+            };
+            keys.push(keyMap[key] || key);
+        }
+        
+        if (keys.length > 0) {
+            const shortcut = keys.join('+');
+            this.recordingShortcut.value = shortcut;
+            
+            // 保存快捷键
+            setTimeout(() => {
+                this.handleConfigChange();
+                this.stopRecordingShortcut();
+            }, 100);
+        }
     }
 
     // 应用主题
