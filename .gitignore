@@ -9,6 +9,7 @@ package-lock.json
 dist/
 build/
 out/
+cache/
 
 # Electron
 *.log
