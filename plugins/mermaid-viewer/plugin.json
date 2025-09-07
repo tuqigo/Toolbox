@@ -1,0 +1,22 @@
+{
+  "name": "Mermaid 图表查看器",
+  "description": "渲染和显示 Mermaid 语法图表，专注于时序图",
+  "logo": "🔧",
+  "window": { 
+    "width": 1000, 
+    "height": 700, 
+    "resizable": true 
+  },
+  "features": [
+    {
+      "code": "mermaid.sequence",
+      "explain": "渲染 Mermaid 时序图",
+      "cmds": [
+        { "type": "keyword", "value": "liuchengtu", "label": "sequ 关键字" },
+        { "type": "regex", "match": "/sequenceDiagram/i", "label": "sequenceDiagram 语法" },
+        { "type": "regex", "match": "/participant\\s+\\w+/i", "label": "participant 语法" },
+        { "type": "regex", "match": "/\\w+\\s*->>?\\s*\\w+/", "label": "消息箭头语法" }
+      ]
+    }
+  ]
+}

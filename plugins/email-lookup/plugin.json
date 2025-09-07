@@ -1,0 +1,24 @@
+{
+  "name": "邮箱查询",
+  "description": "根据邮箱查询用户信息",
+  "logo": "🔧",
+  "window": { "width": 720, "height": 560, "resizable": true },
+  "features": [
+    {
+      "code": "email.lookup",
+      "explain": "邮箱查询",
+      "cmds": [
+        { "type": "regex", "match": "/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$/", "minLength": 8 }
+      ]
+    },
+    {
+      "code": "idcard.lookup",
+      "explain": "身份证查询",
+      "cmds": [
+        { "type": "regex", "match": "/^[1-9]\\d{5}(18|19|20)\\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\\d|3[0-1])\\d{3}[0-9Xx]$/", "minLength": 18 }
+      ]
+    }
+  ]
+}
+
+

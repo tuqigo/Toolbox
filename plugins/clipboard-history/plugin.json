@@ -1,0 +1,19 @@
+{
+  "name": "剪贴板历史",
+  "description": "查看、搜索、复制、删除和清空剪贴板历史",
+  "logo": "🔧",
+  "window": { "width": 720, "height": 560, "resizable": true },
+  "features": [
+    {
+      "code": "clipboard.history",
+      "explain": "剪贴板历史",
+      "cmds": [
+        { "type": "keyword", "value": "clip", "label": "clip" },
+        { "type": "keyword", "value": "剪贴板", "label": "剪贴板" },
+        { "type": "prefix", "value": "clip ", "label": "clip 前缀" }
+      ]
+    }
+  ]
+}
+
+

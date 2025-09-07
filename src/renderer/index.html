@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiniToolbox</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="search-box">
+            <div class="input-container">
+                <input type="text" id="searchInput" placeholder="输入任何内容..." autocomplete="off">
+            </div>
+        </div>
+        
+        <div class="results-container" id="resultsContainer" style="display: none;">
+            <div class="results-list" id="resultsList">
+                <!-- 插件匹配结果将在这里显示 -->
+            </div>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>

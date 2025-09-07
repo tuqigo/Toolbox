@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mermaid 图表查看器</title>
+  <style>
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+      margin: 0; 
+      display: flex; 
+      height: 100vh;
+      background: #f8f9fa;
+    }
+    
+    .sidebar {
+      width: 350px;
+      background: white;
+      border-right: 1px solid #e9ecef;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: white;
+    }
+    
+    .toolbar {
+      padding: 12px;
+      border-bottom: 1px solid #e9ecef;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      background: #f8f9fa;
+    }
+    
+    .editor-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+    }
+    
+    .editor-header {
+      padding: 8px 12px;
+      background: #f8f9fa;
+      border-bottom: 1px solid #e9ecef;
+      font-size: 13px;
+      font-weight: 500;
+      color: #495057;
+    }
+    
+    textarea {
+      flex: 1;
+      border: none;
+      outline: none;
+      padding: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      resize: none;
+      background: #fafbfc;
+    }
+    
+    .viewer-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    
+    .viewer-header {
+      padding: 8px 12px;
+      background: #f8f9fa;
+      border-bottom: 1px solid #e9ecef;
+      font-size: 13px;
+      font-weight: 500;
+      color: #495057;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .viewer-content {
+      flex: 1;
+      overflow: hidden;
+      padding: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: white;
+      user-select: none;
+      position: relative;
+    }
+    
+    #mermaid-diagram {
+      max-width: none;
+      max-height: none;
+      width: auto;
+      height: auto;
+      position: relative;
+    }
+    
+    #mermaid-diagram svg {
+      display: block;
+      transition: transform 0.1s ease-out;
+    }
+    
+    .error-message {
+      color: #dc3545;
+      background: #f8d7da;
+      border: 1px solid #f5c6cb;
+      border-radius: 4px;
+      padding: 12px;
+      margin: 20px;
+      font-size: 14px;
+      display: none;
+    }
+    
+    .btn {
+      padding: 6px 12px;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      background: white;
+      color: #495057;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    
+    .btn:hover {
+      background: #e9ecef;
+      border-color: #adb5bd;
+    }
+    
+    .btn-primary {
+      background: #007bff;
+      border-color: #007bff;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: #0056b3;
+      border-color: #0056b3;
+    }
+    
+    .status {
+      font-size: 12px;
+      color: #6c757d;
+    }
+    
+    .loading {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid #f3f3f3;
+      border-top: 2px solid #007bff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 8px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .examples {
+      padding: 12px;
+      border-top: 1px solid #e9ecef;
+      background: #f8f9fa;
+    }
+    
+    .example-item {
+      margin-bottom: 8px;
+      padding: 8px;
+      background: white;
+      border: 1px solid #e9ecef;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+    
+    .example-item:hover {
+      background: #e9ecef;
+    }
+    
+    .example-title {
+      font-weight: 500;
+      color: #495057;
+      margin-bottom: 4px;
+    }
+    
+    .example-desc {
+      color: #6c757d;
+      font-size: 11px;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+  <script>
+    window.MTAPI = window.MT;
+  </script>
+</head>
+<body>
+  <div class="sidebar">
+    <div class="editor-container">
+      <div class="editor-header">
+        Mermaid 代码编辑器
+      </div>
+      <textarea id="editor" placeholder="在此输入 Mermaid 语法...&#10;&#10;示例:&#10;sequenceDiagram&#10;    participant A as 用户&#10;    participant B as 服务器&#10;    A->>B: 发送请求&#10;    B-->>A: 返回响应"></textarea>
+    </div>
+    
+    <div class="examples">
+      <div class="example-item" data-example="basic">
+        <div class="example-title">基础时序图</div>
+        <div class="example-desc">简单的用户与服务器交互</div>
+      </div>
+      <div class="example-item" data-example="complex">
+        <div class="example-title">复杂时序图</div>
+        <div class="example-desc">包含循环和条件的交互</div>
+      </div>
+      <div class="example-item" data-example="api">
+        <div class="example-title">API 调用流程</div>
+        <div class="example-desc">典型的 API 请求响应流程</div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="main-content">
+    <div class="toolbar">
+      <button id="btnRender" class="btn btn-primary">渲染图表</button>
+      <button id="btnClear" class="btn">清空</button>
+      <button id="btnCopy" class="btn">复制代码</button>
+      <button id="btnExport" class="btn">导出 SVG</button>
+      <div class="status" id="status">就绪</div>
+    </div>
+    
+    <div class="viewer-container">
+      <div class="viewer-header">
+        <span>图表预览 <small style="color: #6c757d; font-size: 11px;">(鼠标拖拽移动，滚轮缩放，空格重置)</small></span>
+        <span id="zoom-controls">
+          <button class="btn" id="btnZoomOut" style="padding: 4px 8px; font-size: 12px;" title="缩小 (-)">缩小</button>
+          <button class="btn" id="btnZoomIn" style="padding: 4px 8px; font-size: 12px;" title="放大 (+)">放大</button>
+          <button class="btn" id="btnZoomReset" style="padding: 4px 8px; font-size: 12px;" title="重置视图 (空格)">重置</button>
+        </span>
+      </div>
+      
+      <div class="viewer-content" id="viewer">
+        <div id="mermaid-diagram"></div>
+        <div id="error-message" class="error-message"></div>
+      </div>
+    </div>
+  </div>
+  
+  <script src="script.js"></script>
+</body>
+</html>

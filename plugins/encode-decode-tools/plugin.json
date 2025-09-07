@@ -1,0 +1,91 @@
+{
+  "name": "编解码工具",
+  "description": "支持 Base64、URL、HTML 等多种编解码功能",
+  "logo": "🔧",
+  "features": [
+    {
+      "code": "base64.encode",
+      "explain": "Base64 编码",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "base64",
+          "label": "base64编码"
+        },
+        {
+          "type": "prefix",
+          "value": "b64 ",
+          "label": "b64前缀"
+        }
+      ]
+    },
+    {
+      "code": "base64.decode",
+      "explain": "Base64 解码",
+      "cmds": [
+        {
+          "type": "regex",
+          "match": "/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/",
+          "minLength": 12,
+          "maxLength": 100000,
+          "label": "base64格式"
+        }
+      ]
+    },
+    {
+      "code": "url.encode",
+      "explain": "URL 编码",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "url",
+          "label": "url编码"
+        },
+        {
+          "type": "prefix",
+          "value": "urlencode ",
+          "label": "urlencode前缀"
+        }
+      ]
+    },
+    {
+      "code": "url.decode",
+      "explain": "URL 解码",
+      "cmds": [
+        {
+          "type": "regex",
+          "match": "/%[0-9A-Fa-f]{2}/",
+          "minLength": 3,
+          "label": "url编码格式"
+        }
+      ]
+    },
+    {
+      "code": "html.encode",
+      "explain": "HTML 编码",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "html",
+          "label": "html编码"
+        },
+        {
+          "type": "regex",
+          "match": "/[<>&\"']/",
+          "label": "包含html字符"
+        }
+      ]
+    },
+    {
+      "code": "html.decode",
+      "explain": "HTML 解码",
+      "cmds": [
+        {
+          "type": "regex",
+          "match": "/&[a-zA-Z0-9#]+;/",
+          "label": "html实体"
+        }
+      ]
+    }
+  ]
+}

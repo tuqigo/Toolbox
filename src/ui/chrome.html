@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline' 'self'; style-src 'unsafe-inline' 'self'; img-src 'self' data:;" />
+  <style>
+    html, body { margin: 0; padding: 0; height: 48px; overflow: hidden; }
+    .bar { height: 48px; display: flex; align-items: center; justify-content: space-between; background: #f9f9fb; border-bottom: 1px solid #ececf2; box-sizing: border-box; padding: 0 8px; -webkit-app-region: drag; }
+    .left, .right { display:flex; align-items:center; gap:8px; -webkit-app-region: no-drag; }
+    .title { font-size: 13px; color: #333; user-select: none; }
+    .icon { font-size: 14px; width: 18px; text-align: center; }
+    .btn { width: 30px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; cursor: pointer; border: none; background: transparent; transition: background-color .15s ease; }
+    .btn:hover { background: rgba(0,0,0,0.06); }
+    .btn:active { background: rgba(0,0,0,0.1); }
+    .btn-close:hover { background: rgba(211,51,51,.12); }
+    .btn-pin svg path { fill: transparent; }
+    .btn-pin.active svg path { fill: #9aa0a6; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <div class="left">
+      <div class="icon" id="icon">🔧</div>
+      <div class="title" id="title">Plugin</div>
+    </div>
+    <div class="right">
+      <div class="btn btn-pin" id="tnPin" title="钉住"><svg width="14" height="14" viewBox="0 0 24 24"><path d="M14 2l4 4-3 3 4 4-2 2-4-4-3 3-4-4 3-3-4-4 2-2 4 4 3-3z" stroke="#666" stroke-width="1.5" fill="transparent"/></svg></div>
+      <div class="btn" id="tnMin" title="最小化"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M5 12h14" stroke="#666" stroke-width="2" stroke-linecap="round"/></svg></div>
+      <div class="btn" id="tnMax" title="最大化/还原"><svg width="12" height="12" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" stroke="#666" stroke-width="2" fill="transparent"/></svg></div>
+      <div class="btn btn-close" id="tnClose" title="关闭"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6l-12 12" stroke="#d33" stroke-width="2" stroke-linecap="round"/></svg></div>
+    </div>
+  </div>
+  <script>
+    (function(){
+      function qs(k){ return new URLSearchParams(location.search).get(k) }
+      const id = qs('id');
+      const name = qs('name') || id;
+      const icon = qs('icon') || '🔧';
+      document.getElementById('title').textContent = name;
+      document.getElementById('icon').textContent = icon;
+
+      const pinEl = document.getElementById('tnPin');
+      let pinned = false;
+      const setPinned = (v)=>{
+        pinned = !!v; if (pinned) pinEl.classList.add('active'); else pinEl.classList.remove('active');
+      }
+      function safe(fn){ try { fn(); } catch(e) { console && console.warn && console.warn('[mt.chrome]', e); } }
+      pinEl.addEventListener('click', ()=> safe(()=>{ setPinned(!pinned); window.MTChrome && window.MTChrome.pin && window.MTChrome.pin(id, pinned); }));
+      document.getElementById('tnMin').addEventListener('click', ()=> safe(()=>{ window.MTChrome.win(id, 'minimize'); }));
+      document.getElementById('tnMax').addEventListener('click', ()=> safe(()=>{ window.MTChrome.win(id, 'toggle-maximize'); }));
+      document.getElementById('tnClose').addEventListener('click', ()=> safe(()=>{ window.MTChrome.win(id, 'close'); }));
+
+      // 主题响应：调整顶栏基色
+      function applyTheme(payload){
+        try {
+          const eff = (payload && payload.effective) || 'light';
+          const bar = document.querySelector('.bar');
+          if (!bar) return;
+          if (eff === 'dark') {
+            bar.style.background = '#1f2023';
+            bar.style.borderBottomColor = '#2a2b2f';
+            document.getElementById('title').style.color = '#e6e7ea';
+          } else {
+            bar.style.background = '#f9f9fb';
+            bar.style.borderBottomColor = '#ececf2';
+            document.getElementById('title').style.color = '#333';
+          }
+        } catch {}
+      }
+      try { window.electron && window.electron.ipcRenderer && window.electron.ipcRenderer.on && window.electron.ipcRenderer.on('ui-theme', (_e,p)=>applyTheme(p)); } catch {}
+      try { applyTheme({ effective: qs('theme') }); } catch {}
+    })();
+  </script>
+</body>
+</html>
+
+

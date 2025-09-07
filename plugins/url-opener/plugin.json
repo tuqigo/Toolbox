@@ -1,0 +1,17 @@
+{
+  "name": "URL 直达",
+  "description": "识别 URL 或域名并在浏览器打开",
+  "logo": "🔧",
+  "features": [
+    {
+      "code": "open.url",
+      "explain": "打开链接",
+      "cmds": [
+        { "type": "regex", "match": "/^https?:\\/\\//i" },
+        { "type": "regex", "match": "/^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$/" }
+      ]
+    }
+  ]
+}
+
+

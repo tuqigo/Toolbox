@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>剪贴板历史</title>
+  <style>
+    :root{
+      --mt-bg:#ffffff; --mt-fg:#333333; --mt-border:#e5e7eb; --mt-panel:#ffffff;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; display: flex; height: 100vh; background: var(--mt-bg); color: var(--mt-fg); }
+    .panel { flex: 1; display: flex; flex-direction: column; background: var(--mt-panel); }
+    .toolbar { padding: 10px; border-bottom: 1px solid var(--mt-border); display: flex; gap: 8px; }
+    .toolbar input { flex: 1; padding: 8px; font-size: 14px; background: transparent; color: var(--mt-fg); border: 1px solid var(--mt-border); border-radius: 6px; }
+    .list { flex: 1; overflow: auto; }
+    .item { padding: 10px; border-bottom: 1px solid var(--mt-border); display: flex; gap: 8px; align-items: center; }
+    .item pre { margin: 0; white-space: pre-wrap; word-break: break-word; flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: var(--mt-fg); }
+    .type { font-size: 12px; color: #888; width: 48px; text-align: center; }
+    .btn { padding: 6px 10px; font-size: 12px; border: 1px solid var(--mt-border); border-radius: 6px; background: transparent; color: var(--mt-fg); cursor: pointer; }
+    .btn:hover { background: rgba(0,0,0,0.06); }
+    .empty { color: #888; padding: 16px; }
+  </style>
+  <script defer src="script.js"></script>
+  <script>
+    (async function(){
+      try {
+        const themeInfo = await window.MT.invoke('ui.getTheme');
+        const eff = (themeInfo && themeInfo.effective) || (themeInfo && themeInfo.data && themeInfo.data.effective);
+        const effective = eff || 'light';
+        const root = document.documentElement;
+        if (effective === 'dark') {
+          root.style.setProperty('--mt-bg', '#0f1214');
+          root.style.setProperty('--mt-panel', '#15181b');
+          root.style.setProperty('--mt-fg', '#e6e7ea');
+          root.style.setProperty('--mt-border', '#2a2b2f');
+        } else {
+          root.style.setProperty('--mt-bg', '#ffffff');
+          root.style.setProperty('--mt-panel', '#ffffff');
+          root.style.setProperty('--mt-fg', '#333333');
+          root.style.setProperty('--mt-border', '#e5e7eb');
+        }
+      } catch {}
+    })();
+  </script>
+</head>
+<body>
+  <div class="panel">
+    <div class="toolbar">
+      <input id="q" placeholder="搜索剪贴板历史..." />
+      <button id="refresh" class="btn">刷新</button>
+      <button id="clear" class="btn">清空</button>
+    </div>
+    <div id="list" class="list"></div>
+  </div>
+</body>
+</html>
+
+

@@ -1,0 +1,1054 @@
+// 在 Windows 下设置控制台编码（必须在其他模块加载前）
+if (process.platform === 'win32') {
+  try {
+    // 设置控制台代码页为 UTF-8
+    const { spawn } = require('child_process');
+    spawn('chcp', ['65001'], { stdio: 'ignore', shell: true });
+    
+    // 设置环境变量
+    process.env.PYTHONIOENCODING = 'utf-8';
+    process.env.LANG = 'zh_CN.UTF-8';
+  } catch (error) {
+    // 忽略错误
+  }
+}
+
+const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, dialog, clipboard, shell } = require('electron');
+const path = require('path');
+const fs = require('fs-extra');
+const { PluginManager } = require('./core/pluginManager');
+const { InputAnalyzer } = require('./core/inputAnalyzer');
+const { WindowManager } = require('./core/windowManager');
+const { ClipboardStore } = require('./core/clipboardStore');
+const { Matcher } = require('./core/matcher');
+const { UsageStore } = require('./core/usageStore');
+const { ConfigStore } = require('./core/configStore');
+const { PluginInstaller } = require('./core/pluginInstaller');
+
+class MiniToolbox {
+  constructor() {
+    this.mainWindow = null;
+    this.tray = null;
+    this.isDev = process.argv.includes('--dev');
+    this.isQuiet = process.argv.includes('--no-console');
+    this.lastClipboardContent = '';
+    this.clipboardTimer = null;
+    // 新核心
+    this.configStore = new ConfigStore({ isQuiet: this.isQuiet });
+    this.pluginManager = new PluginManager({ isQuiet: this.isQuiet });
+    this.inputAnalyzer = new InputAnalyzer({ isQuiet: this.isQuiet });
+    this.windowManager = new WindowManager({ isQuiet: this.isQuiet, titlebarHeight: 48, defaultTheme: 'system' });
+    this.clipboardStore = new ClipboardStore({ isQuiet: this.isQuiet, maxItems: 500 });
+    this.usageStore = new UsageStore({ isQuiet: this.isQuiet });
+    this.matcher = new Matcher({ isQuiet: this.isQuiet, usageStore: this.usageStore });
+    this.pluginInstaller = new PluginInstaller({ isQuiet: this.isQuiet });
+    this.devLoggingInitialized = false;
+    
+    // 剪贴板忽略相关
+    this.ignoreNextClipboardChange = false;
+    this.clipboardIgnoreTimeout = null;
+
+    // 统一拦截主进程内的剪贴板写入，自动抑制一次自动填充
+    try {
+      const originalWriteText = clipboard.writeText.bind(clipboard);
+      clipboard.writeText = (text) => {
+        try { this.setIgnoreNextClipboardChange(); } catch {}
+        try { originalWriteText(String(text || '')); } catch {}
+      };
+    } catch {}
+  }
+
+  // 基础内容分析器 - 只做最基本的分类
+  analyzeContent(content) { return this.inputAnalyzer.analyze(content); }
+
+  // 智能插件匹配器
+  // 使用预建索引与偏好分排序：
+  // - 文本类输入(text/json/url)：仅当命中特征规则(Regex/Keyword/Prefix)时展示
+  // - 非文本类(file/image等)：类型或规则命中皆可展示
+  matchPlugins(contentAnalysis) {
+    return this.matcher.match(contentAnalysis);
+  }
+
+
+  // 系统托盘
+  createTrayIcon() {
+    const { nativeImage } = require('electron');
+    const iconData = Buffer.alloc(16 * 16 * 4);
+    
+    for (let i = 0; i < iconData.length; i += 4) {
+      iconData[i] = 70;     // R
+      iconData[i + 1] = 130; // G  
+      iconData[i + 2] = 180; // B
+      iconData[i + 3] = 255; // A
+    }
+    
+    return nativeImage.createFromBuffer(iconData, { width: 16, height: 16 });
+  }
+
+  createTray() {
+    // 幂等保护，避免重复创建多个托盘图标
+    if (this.tray) {
+      try { this.tray.destroy(); } catch {}
+      this.tray = null;
+    }
+
+    const iconPath = path.join(__dirname, '../plugins/text-processor/deafult.png');
+    let trayIcon;
+    
+    try {
+      if (fs.existsSync(iconPath)) {
+        trayIcon = iconPath;
+      } else {
+        trayIcon = this.createTrayIcon();
+      }
+    } catch (error) {
+      trayIcon = this.createTrayIcon();
+    }
+
+    this.tray = new Tray(trayIcon);
+    
+    const contextMenu = Menu.buildFromTemplate([
+      { label: '显示输入框', click: () => this.showInputWindow() },
+      { label: '重新加载插件', click: () => this.reloadPlugins() },
+      { 
+        label: '标题栏高度', 
+        submenu: [
+          { label: '32px', type: 'radio', checked: (this.windowManager.defaultChromeHeight===32), click: ()=> this.setTitlebarHeight(32) },
+          { label: '40px', type: 'radio', checked: (this.windowManager.defaultChromeHeight===40), click: ()=> this.setTitlebarHeight(40) },
+          { label: '48px', type: 'radio', checked: (this.windowManager.defaultChromeHeight===48), click: ()=> this.setTitlebarHeight(48) },
+          { label: '56px', type: 'radio', checked: (this.windowManager.defaultChromeHeight===56), click: ()=> this.setTitlebarHeight(56) }
+        ]
+      },
+      {
+        label: '主题',
+        submenu: [
+          { label: '跟随系统', type: 'radio', checked: (this.currentTheme==='system' || !this.currentTheme), click: ()=> this.setTheme('system') },
+          { label: '明亮', type: 'radio', checked: (this.currentTheme==='light'), click: ()=> this.setTheme('light') },
+          { label: '暗黑', type: 'radio', checked: (this.currentTheme==='dark'), click: ()=> this.setTheme('dark') }
+        ]
+      },
+      { 
+        label: '剪贴板设置', 
+        submenu: [
+          { 
+            label: '启用自动填充', 
+            type: 'checkbox', 
+            checked: this.configStore.get('clipboard.enabled', true),
+            click: () => this.toggleClipboardAutoFill()
+          },
+          { type: 'separator' },
+          { 
+            label: '有效时间: 3秒', 
+            type: 'radio',
+            checked: this.configStore.get('clipboard.autoFillMaxAge', 5) === 3,
+            click: () => this.setClipboardMaxAge(3)
+          },
+          { 
+            label: '有效时间: 5秒', 
+            type: 'radio',
+            checked: this.configStore.get('clipboard.autoFillMaxAge', 5) === 5,
+            click: () => this.setClipboardMaxAge(5)
+          },
+          { 
+            label: '有效时间: 10秒', 
+            type: 'radio',
+            checked: this.configStore.get('clipboard.autoFillMaxAge', 5) === 10,
+            click: () => this.setClipboardMaxAge(10)
+          },
+          { 
+            label: '有效时间: 30秒', 
+            type: 'radio',
+            checked: this.configStore.get('clipboard.autoFillMaxAge', 5) === 30,
+            click: () => this.setClipboardMaxAge(30)
+          }
+        ]
+      },
+      { label: '设置', click: () => this.openSettings() },
+      { type: 'separator' },
+      { label: '退出', click: () => app.quit() }
+    ]);
+    
+    this.tray.setToolTip('MiniToolbox - 轻量级插件工具箱');
+    this.tray.setContextMenu(contextMenu);
+    
+    this.tray.on('click', () => {
+      this.showInputWindow();
+    });
+  }
+  setTitlebarHeight(px) {
+    try {
+      this.windowManager.setDefaultChromeHeight(px);
+      // 可持久化保存到配置中心（如需）：
+      // await this.configStore.set('ui.titlebar.height', px)
+    } catch {}
+  }
+
+  setTheme(theme) {
+    try {
+      const { nativeTheme } = require('electron');
+      this.currentTheme = theme; // 'system' | 'light' | 'dark'
+      let effective = theme;
+      if (theme === 'system') {
+        effective = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+      }
+      // 主题调色板（可在此按需微调）
+      const palettes = {
+        light: {
+          fg: '#222222',
+          fgMuted: '#666666',
+          panel: '#ffffff',
+          border: 'rgba(0,0,0,0.08)',
+          hover: 'rgba(0,0,0,0.06)',
+          selected: 'rgba(0,122,255,0.12)',
+          iconBg: '#f1f1f3'
+        },
+        dark: {
+          fg: '#e6e7ea',
+          fgMuted: '#a1a1aa',
+          panel: '#2b2d31',
+          border: '#3a3b41',
+          hover: 'rgba(255,255,255,0.06)',
+          selected: 'rgba(0,122,255,0.22)',
+          iconBg: '#3a3b41'
+        }
+      };
+      const palette = palettes[effective] || palettes.light;
+      // 广播给所有视图（标题栏与插件内容）
+      this.windowManager.defaultTheme = theme;
+      this.windowManager.broadcastTheme({ theme, effective, palette });
+      // 广播给主输入窗口
+      try { if (this.mainWindow && !this.mainWindow.isDestroyed()) this.mainWindow.webContents.send('ui-theme', { theme, effective, palette }); } catch {}
+      // 跟随系统时，监听系统主题变化
+      try {
+        if (!this._nativeThemeHooked) {
+          nativeTheme.on('updated', () => {
+            if (this.currentTheme === 'system') {
+              const eff = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+              const pll = palettes[eff] || palettes.light;
+              this.windowManager.broadcastTheme({ theme: 'system', effective: eff, palette: pll });
+              try { if (this.mainWindow && !this.mainWindow.isDestroyed()) this.mainWindow.webContents.send('ui-theme', { theme: 'system', effective: eff, palette: pll }); } catch {}
+            }
+          });
+          this._nativeThemeHooked = true;
+        }
+      } catch {}
+    } catch (e) {
+      console.error('设置主题失败:', e && e.message || e);
+    }
+  }
+
+  // 主窗口
+  createMainWindow() {
+    this.mainWindow = new BrowserWindow({
+      width: 600,
+      height: 400,
+      minWidth: 600,
+      maxWidth: 600,
+      minHeight: 400,
+      maxHeight: 400,
+      show: false,
+      frame: false,
+      transparent: true,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      resizable: false,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+        enableRemoteModule: true
+      }
+    });
+
+    this.mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'));
+
+    this.mainWindow.on('blur', () => {
+      if (!this.isDev) {
+        this.hideMainWindow();
+      }
+    });
+
+    if (this.isDev) {
+      this.mainWindow.webContents.openDevTools();
+    }
+  }
+
+  showInputWindow() {
+    if (this.mainWindow) {
+      this.mainWindow.show();
+      this.mainWindow.center();
+      this.mainWindow.focus();
+    }
+  }
+
+  hideMainWindow() {
+    if (this.mainWindow) {
+      this.mainWindow.hide();
+    }
+  }
+
+  // 插件管理
+  async loadPlugins() { await this.pluginManager.loadAll(); }
+
+  async reloadPlugins() {
+    await this.loadPlugins();
+    this.matcher.rebuild(this.pluginManager.list());
+    
+    // 通知渲染进程重新加载插件列表
+    if (this.mainWindow) {
+      this.mainWindow.webContents.send('plugins-reloaded');
+    }
+  }
+
+  // 插件执行
+  async executePlugin(pluginId, inputData) {
+    const plugin = this.pluginManager.get(pluginId);
+    if (!plugin) {
+      console.error('插件未找到:', pluginId);
+      return;
+    }
+
+    try {
+      // 检查是否是无UI插件
+      if (!plugin.ui) {
+        await this.executeHeadlessPlugin(plugin, inputData);
+      } else {
+        const pluginWindow = await this.createPluginWindow(plugin);
+        // 使用内容视图的 webContents 发送数据（避免发送到顶栏）
+        setTimeout(() => {
+          try {
+            const targetWc = this.windowManager.getContentWebContents(plugin.id) || (pluginWindow && pluginWindow.webContents);
+            if (targetWc && !targetWc.isDestroyed()) {
+              const safeInputData = {
+                content: inputData.content,
+                type: inputData.type,
+                length: inputData.length,
+                lines: inputData.lines,
+                timestamp: inputData.timestamp,
+                featureCode: inputData.featureCode
+              };
+              targetWc.send('plugin-input', safeInputData);
+            }
+          } catch {}
+        }, 300);
+      }
+      
+      // 使用偏好计数
+      try { await this.usageStore.increment(plugin.id); } catch {}
+
+    } catch (error) {
+      console.error('执行插件失败:', error);
+    }
+  }
+
+  // 执行无UI插件
+  async executeHeadlessPlugin(plugin, inputData) {
+    try {
+      // 统一默认：无 UI 插件入口为 script.js（不再兼容其他文件名）
+      const jsPath = path.join(plugin.path, 'script.js');
+      if (await fs.pathExists(jsPath)) {
+        await this.executeNewStylePlugin(plugin, inputData, jsPath);
+        return;
+      }
+      // 兜底：URL 直接打开
+      if (inputData.type === 'url' || inputData.features?.includes('url')) {
+        await this.openUrlDirectly(inputData.content);
+      }
+    } catch (error) {
+      console.error('执行无UI插件失败:', error);
+    }
+  }
+
+
+  // 执行新风格插件
+  async executeNewStylePlugin(plugin, inputData, jsPath) {
+    const pluginModule = require(jsPath);
+    
+    // 根据 featureCode 找到对应的处理器
+    const featureCode = inputData.featureCode;
+    if (!featureCode) {
+      console.error('缺少 featureCode');
+      return;
+    }
+    
+    const featureHandler = pluginModule[featureCode];
+    if (!featureHandler || typeof featureHandler !== 'object') {
+      console.error('找不到 feature 处理器:', featureCode);
+      return;
+    }
+    
+    // 获取进入事件处理器
+    if (typeof featureHandler.handleEnter === 'function') {
+      // 创建回调函数
+      const callbackSetList = (items) => {
+        this.sendListResults(plugin.id, items, inputData);
+      };
+      
+      // 创建重定向函数
+      const redirect = (targetPluginId, content) => {
+        this.redirectToPlugin(targetPluginId, content);
+      };
+      
+      // 构造action对象
+      const action = {
+        payload: inputData.content,
+        type: inputData.type,
+        featureCode: inputData.featureCode,
+        redirect: redirect
+      };
+      
+      try {
+        await featureHandler.handleEnter(action, callbackSetList);
+      } catch (error) {
+        console.error('执行插件进入事件失败:', error);
+        callbackSetList([{
+          title: '插件执行出错',
+          description: error.message || '未知错误',
+          data: null
+        }]);
+      }
+    }
+  }
+
+  // 发送列表结果到渲染进程
+  sendListResults(pluginId, items, inputData) {
+    if (this.mainWindow) {
+      if (this.isDev) {
+        console.log(`[${pluginId}] 发送列表结果:`, {
+          itemCount: items.length
+        });
+        console.log(`[DEBUG] 完整的 items 数据:`, JSON.stringify(items, null, 2));
+      }
+      
+      this.mainWindow.webContents.send('plugin-list-results', {
+        pluginId,
+        items,
+        inputData
+      });
+    }
+  }
+
+  // 重定向到其他插件（直接执行目标插件，避免回填输入框导致的二次匹配闪烁）
+  async redirectToPlugin(targetPluginId, content) {
+    try {
+      // 规范化输入
+      const payload = String(content == null ? '' : content);
+      const ca = this.analyzeContent(payload) || { type: 'text' };
+      const inputData = {
+        content: payload,
+        type: ca.type || 'text',
+        length: payload.length,
+        lines: String(payload).split('\n').length,
+        timestamp: Date.now(),
+        inputMode: 'redirect',
+        featureCode: ''
+      };
+      // 重定向时立即隐藏主输入窗口，避免与目标插件窗口重叠/闪烁
+      try { this.hideMainWindow(); } catch {}
+      await this.executePlugin(targetPluginId, inputData);
+    } catch (e) {
+      // 退回渲染进程兜底
+      if (this.mainWindow) {
+        this.mainWindow.webContents.send('plugin-redirect', { targetPluginId, content });
+      }
+    }
+  }
+
+  // 处理无UI插件的结果
+  async handleHeadlessPluginResult(plugin, result, inputData) {
+    try {
+      // 支持不同的结果格式
+      let resultData = result;
+      
+      // 如果结果是字符串，转换为标准格式
+      if (typeof result === 'string') {
+        resultData = {
+          success: true,
+          result: result,
+          message: '处理完成'
+        };
+      }
+      
+      // 检查插件的 onResult 配置
+      const onResult = plugin.onResult || {};
+      const mode = onResult.mode || 'inline'; // 默认内联显示
+      
+      if (mode === 'inline' && this.mainWindow) {
+        // 发送结果到渲染进程进行内联显示
+        this.mainWindow.webContents.send('headless-plugin-result', {
+          fromPluginId: plugin.id,
+          result: resultData,
+          route: {
+            mode: 'inline'
+          }
+        });
+      }
+      
+      if (this.isDev && !this.isQuiet) {
+        console.log('无UI插件结果:', plugin.id, resultData);
+      }
+      
+    } catch (error) {
+      console.error('处理无UI插件结果失败:', error);
+    }
+  }
+
+  // 直接打开URL
+  async openUrlDirectly(content) {
+    let urlToOpen = content.trim();
+    
+    // 处理不同类型的URL
+    if (!urlToOpen.startsWith('http://') && !urlToOpen.startsWith('https://')) {
+      // 如果是域名，添加https://
+      if (/^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}$/.test(urlToOpen)) {
+        urlToOpen = 'https://' + urlToOpen;
+      }
+      // 如果是本地地址，添加http://
+      else if (/^(localhost|127\.0\.0\.1)/.test(urlToOpen)) {
+        urlToOpen = 'http://' + urlToOpen;
+      }
+      // 如果是IP地址，添加http://
+      else if (/^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/.test(urlToOpen)) {
+        urlToOpen = 'http://' + urlToOpen;
+      }
+    }
+
+    if (this.isDev && !this.isQuiet) {
+      console.log('打开链接:', urlToOpen);
+    }
+
+    try {
+      await shell.openExternal(urlToOpen);
+      return true;
+    } catch (error) {
+      console.error('打开链接失败:', error);
+      return false;
+    }
+  }
+
+  async createPluginWindow(plugin) { return this.windowManager.createForPlugin(plugin); }
+
+  // 在主进程发起 HTTP/HTTPS 请求，避免渲染进程的跨域与权限限制
+  async performRequest(reqOptions) {
+    return await new Promise((resolve) => {
+      try {
+        const isHttps = String(reqOptions.protocol || '').toLowerCase().startsWith('https') || (!reqOptions.protocol && reqOptions.port === 443);
+        const mod = isHttps ? require('https') : require('http');
+        const options = {
+          hostname: reqOptions.hostname,
+          port: reqOptions.port || (isHttps ? 443 : 80),
+          path: reqOptions.path || '/',
+          method: reqOptions.method || 'GET',
+          headers: reqOptions.headers || {}
+        };
+
+        const req = mod.request(options, (res) => {
+          const chunks = [];
+          res.on('data', (d) => chunks.push(Buffer.from(d)));
+          res.on('end', () => {
+            const buf = Buffer.concat(chunks);
+            resolve({ ok: true, status: res.statusCode, headers: res.headers, data: buf.toString('utf8') });
+          });
+        });
+
+        req.on('error', (err) => resolve({ ok: false, error: err.message }));
+
+        if (reqOptions.body) {
+          const bodyStr = typeof reqOptions.body === 'string' ? reqOptions.body : JSON.stringify(reqOptions.body);
+          if (!options.headers['Content-Type'] && !options.headers['content-type']) req.setHeader('Content-Type', 'application/json');
+          req.write(bodyStr);
+        }
+        req.end();
+      } catch (e) {
+        resolve({ ok: false, error: e.message });
+      }
+    });
+  }
+
+  // IPC 处理器
+  setupIpcHandlers() {
+    const getPluginIdFromEvent = (event) => {
+      try {
+        const wc = event && event.sender;
+        return this.windowManager.getPluginIdForWebContents(wc);
+      } catch { return null; }
+    };
+
+    // 安全调用网关
+    ipcMain.handle('mt.secure-call', async (event, { pluginId, channel, payload } = {}) => {
+      const pid = pluginId || getPluginIdFromEvent(event);
+      const meta = pid && this.pluginManager.get(pid);
+      if (!meta) return { ok: false, error: 'unknown plugin' };
+
+      try {
+        switch (channel) {
+          case 'clipboard.readText':
+            return { ok: true, data: clipboard.readText() };
+          case 'clipboard.writeText':
+            this.setIgnoreNextClipboardChange();
+            clipboard.writeText(String(payload || ''));
+            return { ok: true };
+          case 'write-clipboard':
+            clipboard.writeText(String(payload || ''));
+            return { ok: true };
+          case 'openExternal':
+            await shell.openExternal(String(payload || ''));
+            return { ok: true };
+          case 'net.request':
+            return await this.performRequest(payload);
+          case 'ui.getTheme': {
+            try {
+              const { nativeTheme } = require('electron');
+              const cur = this.currentTheme || 'system';
+              const eff = cur === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : cur;
+              return { ok: true, data: { theme: cur, effective: eff } };
+            } catch (e) {
+              return { ok: true, data: { theme: 'system', effective: 'light' } };
+            }
+          }
+          case 'plugin.list': {
+            const list = this.pluginManager.list().map(p => ({
+              id: p.id,
+              name: p.name,
+              description: p.description,
+              icon: p.icon,
+              ui: !!p.ui
+            }));
+            return { ok: true, data: list };
+          }
+          case 'plugin.reload': {
+            await this.reloadPlugins();
+            const list = this.pluginManager.list().map(p => ({
+              id: p.id,
+              name: p.name,
+              description: p.description,
+              icon: p.icon,
+              ui: !!p.ui
+            }));
+            return { ok: true, data: list };
+          }
+          case 'clip.query':
+            return { ok: true, data: await this.clipboardStore.query(payload) };
+          case 'clip.delete':
+            return { ok: true, data: await this.clipboardStore.delete(payload) };
+          case 'clip.clear':
+            return { ok: true, data: await this.clipboardStore.clear() };
+          case 'clip.copy':
+            clipboard.writeText(String(payload || ''));
+            return { ok: true };
+          case 'installer.search':
+            return { ok: true, data: await this.pluginInstaller.searchPlugins(payload.keyword, payload.options) };
+          case 'installer.getInfo':
+            return { ok: true, data: await this.pluginInstaller.getPluginInfo(payload) };
+          case 'installer.getInstalled':
+            return { ok: true, data: await this.pluginInstaller.getInstalledPlugins() };
+          case 'installer.install':
+            await this.pluginInstaller.installPlugin(payload.pluginId, payload.version);
+            return { ok: true };
+          case 'installer.uninstall':
+            await this.pluginInstaller.uninstallPlugin(payload);
+            return { ok: true };
+          case 'installer.update':
+            return { ok: true, data: await this.pluginInstaller.updatePlugin(payload.pluginId, payload.version) };
+          case 'installer.checkUpdates':
+            return { ok: true, data: await this.pluginInstaller.checkUpdates() };
+          case 'installer.installFromFile':
+            await this.pluginInstaller.installFromFile(payload);
+            return { ok: true };
+          default:
+            return { ok: false, error: 'unknown channel' };
+        }
+      } catch (e) {
+        return { ok: false, error: e && e.message || String(e) };
+      }
+    });
+    // 返回插件权限（供插件自查）
+    // 权限不再由 manifest 声明（保留接口但返回空数组）
+    ipcMain.handle('mt.get-permissions', async () => []);
+    // 获取剪贴板内容（原始方法，保持兼容性）
+    ipcMain.handle('get-clipboard', () => {
+      return clipboard.readText();
+    });
+
+    // 获取最近的剪贴板内容（根据配置的时间限制）
+    ipcMain.handle('get-recent-clipboard', () => {
+      const clipboardConfig = this.configStore.getClipboardConfig();
+      if (!clipboardConfig.enabled) {
+        return null;
+      }
+      
+      const recentItem = this.clipboardStore.getRecentClipboard(clipboardConfig.autoFillMaxAge);
+      return recentItem ? recentItem.text : null;
+    });
+
+    // 获取剪贴板配置
+    ipcMain.handle('get-clipboard-config', () => {
+      return this.configStore.getClipboardConfig();
+    });
+
+    // 设置剪贴板配置
+    ipcMain.handle('set-clipboard-config', async (event, config) => {
+      if (config.autoFillMaxAge !== undefined) {
+        await this.configStore.setClipboardMaxAge(config.autoFillMaxAge);
+      }
+      if (config.enabled !== undefined) {
+        await this.configStore.set('clipboard.enabled', config.enabled);
+      }
+      return this.configStore.getClipboardConfig();
+    });
+
+    // 设置剪贴板内容
+    ipcMain.handle('write-clipboard', (event, text) => {
+      try {
+        this.setIgnoreNextClipboardChange();
+        clipboard.writeText(String(text || ''));
+        return true;
+      } catch (error) {
+        console.error('写入剪贴板失败:', error);
+        return false;
+      }
+    });
+
+    // 打开 URL
+    ipcMain.handle('open-url', async (event, url) => {
+      try {
+        await shell.openExternal(url);
+        return true;
+      } catch (error) {
+        console.error('打开 URL 失败:', error);
+        return false;
+      }
+    });
+
+    // 隐藏主窗口
+    ipcMain.on('hide-main-window', () => {
+      this.hideMainWindow();
+    });
+
+    // 插件窗口钉住控制
+    ipcMain.on('mt.plugin.pin', (_e, { pluginId, pinned } = {}) => {
+      try {
+        if (!pluginId) return;
+        const win = this.windowManager.getWindow(pluginId);
+        if (win && !win.isDestroyed()) {
+          win.__mtPinned = !!pinned;
+          try { win.setAlwaysOnTop(!!pinned, 'screen-saver'); } catch {}
+        }
+      } catch {}
+    });
+
+    // 插件窗口 DevTools 控制
+    ipcMain.on('mt.plugin.devtools', (_e, { pluginId, open, toggle } = {}) => {
+      try {
+        const win = this.windowManager.getWindow(pluginId);
+        if (!win || win.isDestroyed()) return;
+        const wc = win.webContents;
+        if (toggle) {
+          if (wc.isDevToolsOpened()) wc.closeDevTools(); else wc.openDevTools({ mode: 'detach' });
+          return;
+        }
+        if (open) wc.openDevTools({ mode: 'detach' }); else wc.closeDevTools();
+      } catch {}
+    });
+
+    // 插件窗口标准控制（用于自定义美化后的按钮）
+    ipcMain.on('mt.plugin.win', (_e, { pluginId, action } = {}) => {
+      try {
+        if (!pluginId) return;
+        const win = this.windowManager.getWindow(pluginId);
+        if (!win || win.isDestroyed()) return;
+        switch (action) {
+          case 'minimize':
+            win.minimize();
+            break;
+          case 'maximize':
+            win.maximize();
+            break;
+          case 'toggle-maximize':
+            if (win.isMaximized()) win.unmaximize(); else win.maximize();
+            break;
+          case 'close':
+            win.close();
+            break;
+          default:
+            // 动态设置顶栏高度：action 形如 set-chrome-height:64
+            if (String(action||'').startsWith('set-chrome-height:')) {
+              const h = parseInt(String(action).split(':')[1], 10);
+              try { this.windowManager.setChromeHeight(pluginId, h); } catch {}
+            }
+        }
+      } catch {}
+    });
+
+    // 查询插件元信息（用于标题栏显示图标与名称）
+    ipcMain.handle('mt.get-plugin-meta', (event) => {
+      try {
+        const wc = event && event.sender;
+        const pid = this.windowManager.getPluginIdForWebContents(wc);
+        const meta = pid && this.pluginManager.get(pid);
+        if (!meta) return null;
+        return { id: meta.id, name: meta.name, icon: meta.icon };
+      } catch { return null; }
+    });
+
+    // 执行插件
+    ipcMain.on('execute-plugin', (event, pluginId, inputData) => {
+      if (!this.isQuiet) {
+        console.log('收到插件执行请求:', pluginId, inputData);
+      }
+      this.executePlugin(pluginId, inputData).catch(error => {
+        console.error('插件执行出错:', error);
+      });
+    });
+
+    // 处理列表项选择事件
+    ipcMain.on('plugin-list-select', async (event, pluginId, itemData, inputData) => {
+      try {
+        const plugin = this.pluginManager.get(pluginId);
+        if (!plugin) return;
+
+        const jsPath = path.join(plugin.path, 'script.js');
+        if (!fs.existsSync(jsPath)) return;
+        const pluginModule = require(jsPath);
+        const featureCode = inputData.featureCode;
+        
+        if (!featureCode) return;
+        
+        const featureHandler = pluginModule[featureCode];
+        if (!featureHandler || typeof featureHandler !== 'object') return;
+
+        if (typeof featureHandler.handleSelect === 'function') {
+          // 创建回调函数
+          const callbackSetList = (items) => {
+            this.sendListResults(pluginId, items, inputData);
+          };
+
+          // 创建重定向函数
+          const redirect = (targetPluginId, content) => {
+            this.redirectToPlugin(targetPluginId, content);
+          };
+
+          // 构造action对象
+          const action = {
+            payload: inputData.content,
+            type: inputData.type,
+            featureCode: inputData.featureCode,
+            redirect: redirect
+          };
+
+          if (this.isDev) console.log(`[DEBUG] 调用 ${featureCode} 的 handleSelect`);
+          await featureHandler.handleSelect(action, itemData, callbackSetList);
+          if (this.isDev) console.log(`[DEBUG] ${featureCode} 的 handleSelect 执行完成`);
+        }
+        
+        // 保持默认 blur 行为
+      } catch (error) {
+        console.error('处理列表选择事件失败:', error);
+        // 不修改 blur 行为
+      }
+    });
+
+    // 分析内容
+    ipcMain.handle('analyze-content', (event, content) => {
+      return this.analyzeContent(content);
+    });
+
+    // 匹配插件
+    ipcMain.handle('match-plugins', (event, contentAnalysis) => {
+      return this.matchPlugins(contentAnalysis);
+    });
+
+    // 通用网络请求（主进程代发）
+    ipcMain.handle('net.request', async (event, reqOptions) => {
+      return this.performRequest(reqOptions);
+    });
+
+    // 剪贴板历史接口
+    ipcMain.handle('clip.query', (event, params) => {
+      return this.clipboardStore.query(params);
+    });
+    ipcMain.handle('clip.delete', async (event, id) => {
+      return this.clipboardStore.delete(id);
+    });
+    ipcMain.handle('clip.clear', async () => {
+      return this.clipboardStore.clear();
+    });
+    ipcMain.handle('clip.copy', async (event, text) => {
+      try { clipboard.writeText(String(text || '')); return true; } catch { return false; }
+    });
+  }
+
+  // 剪贴板监听
+  startClipboardMonitoring() {
+    this.lastClipboardContent = clipboard.readText();
+    
+    this.clipboardTimer = setInterval(() => {
+      const currentContent = clipboard.readText();
+      if (currentContent !== this.lastClipboardContent) {
+        this.lastClipboardContent = currentContent;
+        this.onClipboardChange(currentContent);
+        // 记录到历史
+        this.clipboardStore.add(currentContent).catch(() => {});
+      }
+    }, 500);
+  }
+
+  stopClipboardMonitoring() {
+    if (this.clipboardTimer) {
+      clearInterval(this.clipboardTimer);
+      this.clipboardTimer = null;
+    }
+  }
+
+  onClipboardChange(content) {
+    if (this.mainWindow) {
+      // 如果设置了忽略标记，则跳过这次剪贴板变化
+      if (this.ignoreNextClipboardChange) {
+        this.ignoreNextClipboardChange = false;
+        if (this.clipboardIgnoreTimeout) {
+          clearTimeout(this.clipboardIgnoreTimeout);
+          this.clipboardIgnoreTimeout = null;
+        }
+        console.log('🚫 主进程忽略剪贴板变化（插件复制）');
+        return;
+      }
+      
+      this.mainWindow.webContents.send('clipboard-changed', content);
+    }
+  }
+
+  // 设置忽略下一次剪贴板变化（用于插件复制操作）
+  setIgnoreNextClipboardChange() {
+    this.ignoreNextClipboardChange = true;
+    console.log('📌 主进程设置剪贴板忽略标记');
+    
+    if (this.clipboardIgnoreTimeout) {
+      clearTimeout(this.clipboardIgnoreTimeout);
+    }
+    this.clipboardIgnoreTimeout = setTimeout(() => {
+      this.ignoreNextClipboardChange = false;
+      this.clipboardIgnoreTimeout = null;
+      console.log('⏰ 主进程忽略标记超时清除');
+    }, 2000);
+  }
+
+  // 全局快捷键
+  registerGlobalShortcuts() {
+    const ret = globalShortcut.register('Ctrl+Space', () => {
+      this.showInputWindow();
+    });
+
+    if (!ret) {
+      console.error('全局快捷键注册失败');
+    }
+  }
+
+  async toggleClipboardAutoFill() {
+    const newState = await this.configStore.toggleClipboardAutoFill();
+    console.log(`剪贴板自动填充已${newState ? '启用' : '禁用'}`);
+    
+    // 重新创建托盘菜单以更新选中状态
+    this.createTray();
+  }
+
+  async setClipboardMaxAge(seconds) {
+    await this.configStore.setClipboardMaxAge(seconds);
+    console.log(`剪贴板有效时间已设置为 ${seconds} 秒`);
+    
+    // 重新创建托盘菜单以更新选中状态
+    this.createTray();
+  }
+
+  openSettings() {
+    // TODO: 实现设置界面
+    console.log('打开设置界面');
+  }
+
+  async init() {
+    this.setupConsoleEncoding();
+    // DEV: 将渲染进程日志输出到终端
+    if (this.isDev && !this.devLoggingInitialized) {
+      try { app.commandLine.appendSwitch('enable-logging'); } catch {}
+      this.setupDevLogging();
+      this.devLoggingInitialized = true;
+    }
+
+    const gotTheLock = app.requestSingleInstanceLock();
+    if (!gotTheLock) {
+      app.quit();
+      return;
+    }
+
+    app.on('second-instance', () => {
+      this.showInputWindow();
+    });
+
+    app.on('window-all-closed', (event) => {
+      event.preventDefault();
+    });
+
+    app.on('before-quit', () => {
+      this.stopClipboardMonitoring();
+      globalShortcut.unregisterAll();
+      try { if (this.tray) { this.tray.destroy(); this.tray = null; } } catch {}
+    });
+
+    try {
+      await app.whenReady();
+      
+      await this.configStore.load();
+      await this.usageStore.load();
+      await this.clipboardStore.load();
+      this.createTray();
+      this.createMainWindow();
+      this.registerGlobalShortcuts();
+      await this.loadPlugins();
+      this.matcher.rebuild(this.pluginManager.list());
+      this.setupIpcHandlers();
+      this.startClipboardMonitoring();
+      
+      if (!this.isQuiet) {
+        console.log('MiniToolbox 启动成功');
+      }
+    } catch (error) {
+      console.error('应用启动失败:', error);
+      app.quit();
+    }
+  }
+
+  setupConsoleEncoding() {
+    if (!this.isQuiet && this.isDev) {
+      console.log('控制台编码: UTF-8');
+    }
+  }
+
+  setupDevLogging() {
+    const logErr = (...args) => { try { console.error('[DEV]', ...args); } catch {} };
+    process.on('uncaughtException', (err) => logErr('uncaughtException', err && err.stack || err));
+    process.on('unhandledRejection', (reason) => logErr('unhandledRejection', reason));
+
+    app.on('render-process-gone', (event, webContents, details) => {
+      logErr('render-process-gone', details);
+    });
+
+    const hookWebContents = (wc) => {
+      try {
+        wc.on('console-message', (_e, level, message, line, sourceId) => {
+          const lvl = ['LOG','WARN','ERROR','INFO','DEBUG'][level] || level;
+          console.log(`[Renderer:${lvl}]`, message, sourceId ? `${sourceId}:${line}` : '');
+        });
+        wc.on('crashed', () => logErr('webContents crashed'));
+        wc.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+          logErr('did-fail-load', { errorCode, errorDescription, validatedURL, isMainFrame });
+        });
+      } catch {}
+    };
+
+    app.on('browser-window-created', (_e, win) => {
+      try { hookWebContents(win.webContents); } catch {}
+    });
+  }
+}
+
+// 启动应用
+const miniToolbox = new MiniToolbox();
+miniToolbox.init().catch(console.error);
