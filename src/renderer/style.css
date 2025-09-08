@@ -42,7 +42,14 @@ body {
 .input-container {
     position: relative;
     display: flex;
+    flex-direction: column;
+}
+
+.input-display {
+    position: relative;
+    display: flex;
     align-items: center;
+    min-height: 52px; /* 确保有足够高度显示预览 */
 }
 
 #searchInput {
@@ -227,4 +234,147 @@ body {
     font-size: 32px;
     margin-bottom: 12px;
     opacity: 0.5;
+}
+
+/* 多行文本预览样式 */
+.multiline-preview {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--mt-panel, rgba(255, 255, 255, 0.8));
+    border: 2px dashed var(--mt-border, rgba(0, 122, 255, 0.3));
+    border-radius: 8px;
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 14px;
+    color: var(--mt-fg, #333);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    outline: none;
+    z-index: 10;
+    min-height: 50px;
+}
+
+.multiline-preview:hover,
+.multiline-preview:focus {
+    border-color: var(--mt-border, rgba(0, 122, 255, 0.5));
+    background: var(--mt-hover, rgba(0, 122, 255, 0.05));
+}
+
+.preview-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-right: 8px;
+    font-style: italic;
+    color: var(--mt-text-muted, #666);
+}
+
+.edit-button {
+    background: var(--mt-selected, rgba(0, 122, 255, 0.1));
+    border: 1px solid var(--mt-border, rgba(0, 122, 255, 0.3));
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: var(--mt-fg, #333);
+    flex-shrink: 0;
+    outline: none;
+}
+
+.edit-button:hover {
+    background: var(--mt-selected, rgba(0, 122, 255, 0.2));
+    border-color: var(--mt-border, rgba(0, 122, 255, 0.5));
+}
+
+.edit-button:active {
+    background: var(--mt-selected, rgba(0, 122, 255, 0.3));
+}
+
+/* 编辑区域样式 */
+.edit-area {
+    border-top: 1px solid var(--mt-border, rgba(0, 0, 0, 0.1));
+    padding: 12px 20px;
+    background: var(--mt-panel, rgba(0, 0, 0, 0.02));
+}
+
+#editTextarea {
+    width: 100%;
+    min-height: 120px;
+    max-height: 300px;
+    padding: 12px 16px;
+    border: 1px solid var(--mt-border, rgba(0, 0, 0, 0.1));
+    border-radius: 6px;
+    background: var(--mt-panel, white);
+    color: var(--mt-fg, #333);
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+    outline: none;
+}
+
+#editTextarea:focus {
+    border-color: var(--mt-selected, rgba(0, 122, 255, 0.5));
+    box-shadow: 0 0 0 2px var(--mt-selected, rgba(0, 122, 255, 0.1));
+}
+
+/* 编辑区域滚动条样式 */
+#editTextarea::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+#editTextarea::-webkit-scrollbar-track {
+    background: var(--mt-scrollbar-track, transparent);
+    border-radius: 4px;
+}
+
+#editTextarea::-webkit-scrollbar-thumb {
+    background: var(--mt-scrollbar-thumb, rgba(0, 0, 0, 0.2));
+    border-radius: 4px;
+}
+
+#editTextarea::-webkit-scrollbar-thumb:hover {
+    background: var(--mt-scrollbar-thumb-hover, rgba(0, 0, 0, 0.3));
+}
+
+.edit-controls {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.save-button,
+.cancel-button {
+    padding: 6px 12px;
+    border: 1px solid var(--mt-border, rgba(0, 0, 0, 0.1));
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: var(--mt-panel, white);
+    color: var(--mt-fg, #333);
+}
+
+.save-button {
+    background: var(--mt-selected, rgba(0, 122, 255, 0.1));
+    border-color: var(--mt-selected, rgba(0, 122, 255, 0.3));
+    color: var(--mt-selected, #007AFF);
+}
+
+.save-button:hover {
+    background: var(--mt-selected, rgba(0, 122, 255, 0.2));
+    border-color: var(--mt-selected, rgba(0, 122, 255, 0.5));
+}
+
+.cancel-button:hover {
+    background: var(--mt-hover, rgba(0, 0, 0, 0.05));
+    border-color: var(--mt-border, rgba(0, 0, 0, 0.2));
 }

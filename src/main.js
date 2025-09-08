@@ -30,6 +30,7 @@ class MiniToolbox {
     this.mainWindow = null;
     this.tray = null;
     this.isDev = process.argv.includes('--dev');
+    this.isEditingMode = false; // 是否处于编辑模式
     this.isQuiet = process.argv.includes('--no-console');
     this.lastClipboardContent = '';
     this.clipboardTimer = null;
@@ -253,8 +254,14 @@ class MiniToolbox {
     this.mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'));
 
     this.mainWindow.on('blur', () => {
-      if (!this.isDev) {
-        this.hideMainWindow();
+      if (!this.isDev && !this.isEditingMode) {
+        // 添加短暂延迟，避免快速焦点切换时误触发
+        setTimeout(() => {
+          // 再次检查窗口状态，如果窗口仍然失去焦点且不在编辑模式，则隐藏
+          if (this.mainWindow && !this.mainWindow.isFocused() && !this.isEditingMode) {
+            this.hideMainWindow();
+          }
+        }, 100);
       }
     });
 
@@ -783,6 +790,11 @@ class MiniToolbox {
     // 隐藏主窗口
     ipcMain.on('hide-main-window', () => {
       this.hideMainWindow();
+    });
+
+    // 设置编辑模式状态
+    ipcMain.on('set-editing-mode', (event, isEditing) => {
+      this.isEditingMode = !!isEditing;
     });
 
     // 插件窗口钉住控制

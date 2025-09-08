@@ -10,7 +10,20 @@
     <div class="container">
         <div class="search-box">
             <div class="input-container">
-                <input type="text" id="searchInput" placeholder="输入任何内容..." autocomplete="off">
+                <div class="input-display" id="inputDisplay">
+                    <input type="text" id="searchInput" placeholder="输入任何内容..." autocomplete="off">
+                    <div class="multiline-preview" id="multilinePreview" style="display: none;">
+                        <span class="preview-text" id="previewText"></span>
+                        <button class="edit-button" id="editButton" title="编辑">✏️</button>
+                    </div>
+                </div>
+            </div>
+            <div class="edit-area" id="editArea" style="display: none;">
+                <textarea id="editTextarea" placeholder="在此编辑多行文本..."></textarea>
+                <div class="edit-controls">
+                    <button class="save-button" id="saveButton">保存</button>
+                    <button class="cancel-button" id="cancelButton">取消</button>
+                </div>
             </div>
         </div>
         

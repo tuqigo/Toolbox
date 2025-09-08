@@ -5,6 +5,13 @@ class MiniToolboxRenderer {
   constructor() {
     this.searchInput = null;
     this.resultsList = null;
+    this.multilinePreview = null;
+    this.previewText = null;
+    this.editButton = null;
+    this.editArea = null;
+    this.editTextarea = null;
+    this.saveButton = null;
+    this.cancelButton = null;
     
     this.currentContentAnalysis = null;
     this.selectedIndex = -1;
@@ -16,6 +23,11 @@ class MiniToolboxRenderer {
     this.lastInputTime = 0; // 上次输入时间
     this.inputClearTimeout = null; // 清除输入的超时定时器
     this.autoFillEnabled = true; // 是否启用自动填充
+    
+    // 多行文本管理
+    this.actualContent = ''; // 实际的完整内容（包括换行）
+    this.isMultilineMode = false; // 是否处于多行模式
+    this.isEditingMode = false; // 是否处于编辑模式（本地状态）
     
     this.init();
   }
@@ -31,12 +43,20 @@ class MiniToolboxRenderer {
   initElements() {
     this.searchInput = document.getElementById('searchInput');
     this.resultsList = document.getElementById('resultsList');
+    this.multilinePreview = document.getElementById('multilinePreview');
+    this.previewText = document.getElementById('previewText');
+    this.editButton = document.getElementById('editButton');
+    this.editArea = document.getElementById('editArea');
+    this.editTextarea = document.getElementById('editTextarea');
+    this.saveButton = document.getElementById('saveButton');
+    this.cancelButton = document.getElementById('cancelButton');
     
 
     if (!this.searchInput || !this.resultsList) {
       console.error('关键元素未找到！');
       return;
     }
+
 
     this.setupEventListeners();
 
@@ -53,6 +73,7 @@ class MiniToolboxRenderer {
     this.searchInput.addEventListener('input', () => {
       this.lastInputTime = Date.now(); // 记录输入时间
       this.autoFillEnabled = false; // 用户手动输入时禁用自动填充
+      this.actualContent = this.searchInput.value; // 同步实际内容
       this.performSearch();
     });
 
@@ -77,7 +98,24 @@ class MiniToolboxRenderer {
 
     // 窗口获得焦点时的处理
     window.addEventListener('focus', () => {
+      // 重置自动填充状态，允许重新自动填充剪贴板内容
+      this.autoFillEnabled = true;
       this.focusInput();
+    });
+
+    // 窗口失去焦点时的处理
+    window.addEventListener('blur', () => {
+      // 如果不在编辑模式，延迟一点时间后隐藏窗口
+      if (!this.isEditingMode) {
+        setTimeout(() => {
+          // 再次检查是否仍然失去焦点且不在编辑模式
+          if (!document.hasFocus() && !this.isEditingMode) {
+            try {
+              ipcRenderer.send('hide-main-window');
+            } catch {}
+          }
+        }, 150);
+      }
     });
 
     // 点击窗口空白区域时隐藏主窗口（不在输入框或结果列表上）
@@ -86,7 +124,10 @@ class MiniToolboxRenderer {
         const target = e.target;
         const inInput = this.searchInput && (target === this.searchInput || this.searchInput.contains(target));
         const inResults = this.resultsList && (target === this.resultsList || this.resultsList.contains(target));
-        if (!inInput && !inResults) {
+        const inMultilinePreview = this.multilinePreview && (target === this.multilinePreview || this.multilinePreview.contains(target));
+        const inEditArea = this.editArea && (target === this.editArea || this.editArea.contains(target));
+        
+        if (!inInput && !inResults && !inMultilinePreview && !inEditArea) {
           // 记录隐藏时间，用于判断是否需要清除输入
           this.lastInputTime = Date.now();
           ipcRenderer.send('hide-main-window');
@@ -105,11 +146,8 @@ class MiniToolboxRenderer {
 
     // 清除输入框内容
     ipcRenderer.on('clear-input', () => {
-      if (this.searchInput) {
-        this.searchInput.value = '';
-        this.performSearch(); // 清除搜索结果
-        this.autoFillEnabled = true; // 重置自动填充状态
-      }
+      this.clearContent();
+      this.autoFillEnabled = true; // 重置自动填充状态
     });
 
     // 接收插件列表结果
@@ -195,6 +233,60 @@ class MiniToolboxRenderer {
       } catch {}
     });
 
+    // 多行文本相关事件监听器
+    if (this.editButton) {
+      this.editButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.showEditArea();
+      });
+    }
+
+    if (this.multilinePreview) {
+      this.multilinePreview.addEventListener('click', (e) => {
+        // 检查点击的是否是编辑按钮或其子元素
+        if (!e.target.closest('.edit-button')) {
+          this.showEditArea();
+        }
+      });
+
+      // 添加键盘事件支持
+      this.multilinePreview.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          this.showEditArea();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          this.clearContent();
+        } else {
+          // 传递其他键盘事件给handleKeydown
+          this.handleKeydown(e);
+        }
+      });
+    }
+
+    if (this.saveButton) {
+      this.saveButton.addEventListener('click', () => {
+        this.saveMultilineContent();
+      });
+    }
+
+    if (this.cancelButton) {
+      this.cancelButton.addEventListener('click', () => {
+        this.hideEditArea();
+      });
+    }
+
+    if (this.editTextarea) {
+      this.editTextarea.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          this.hideEditArea();
+        } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          this.saveMultilineContent();
+        }
+      });
+    }
+
     // 初始化时自动聚焦
     setTimeout(() => {
       this.focusInput();
@@ -202,53 +294,63 @@ class MiniToolboxRenderer {
   }
 
   async focusInput() {
-    if (this.searchInput) {
-      // 检查是否需要清除输入内容（超过3秒）
-      const now = Date.now();
-      const timeSinceLastInput = now - this.lastInputTime;
-      
-      if (timeSinceLastInput > 5000 && this.searchInput.value.trim()) {
-        // 超过5秒且有内容，清除输入
-        this.searchInput.value = '';
-        this.performSearch();
-        this.autoFillEnabled = true; // 重置自动填充状态
-      }
-      
+    // 检查是否需要清除输入内容（超过3秒）
+    const now = Date.now();
+    const timeSinceLastInput = now - this.lastInputTime;
+    
+    if (timeSinceLastInput > 5000 && this.actualContent.trim()) {
+      // 超过5秒且有内容，清除输入
+      this.clearContent();
+      this.autoFillEnabled = true; // 重置自动填充状态
+    }
+    
+    // 根据当前模式聚焦到相应元素
+    if (this.isMultilineMode && this.multilinePreview) {
+      // 多行模式下，让预览区域可以接收焦点
+      this.multilinePreview.setAttribute('tabindex', '0');
+      this.multilinePreview.focus();
+    } else if (this.searchInput) {
       this.searchInput.focus();
       this.searchInput.select();
-      
-      // 只有在启用自动填充且输入框为空时才自动填充剪贴板内容
-      if (this.autoFillEnabled && !this.searchInput.value.trim()) {
-        await this.autoFillClipboard();
-      }
+    }
+    
+    // 只有在启用自动填充且输入框为空时才自动填充剪贴板内容
+    if (this.autoFillEnabled && !this.actualContent.trim()) {
+      await this.autoFillClipboard();
     }
   }
 
   async autoFillClipboard() {
     try {
-      // 使用新的最近剪贴板内容API
+      // 获取配置信息
+      const config = await ipcRenderer.invoke('get-clipboard-config');
+      
+      // 使用新的最近剪贴板内容API（带时间限制）
       const recentClipboard = await ipcRenderer.invoke('get-recent-clipboard');
+      
       if (recentClipboard && recentClipboard.trim()) {
-        this.searchInput.value = recentClipboard.trim();
-        this.performSearch();
+        this.setContent(recentClipboard);
         this.autoFillEnabled = false; // 禁用自动填充，避免重复填充
         
-        // 获取配置信息用于调试
-        const config = await ipcRenderer.invoke('get-clipboard-config');
         console.log(`自动填充剪贴板内容 (最大时间: ${config.autoFillMaxAge}秒):`, recentClipboard.substring(0, 50));
       } else {
-        if (process.env.NODE_ENV === 'development') console.log('没有找到最近的剪贴板内容或功能已禁用');
+        // 如果没有符合时间条件的剪贴板内容，就不自动填充
+        // 这样可以确保时间限制的有效性
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`没有符合时间条件(${config.autoFillMaxAge}秒)的剪贴板内容，跳过自动填充`);
+        }
       }
     } catch (error) {
       console.error('获取最近剪贴板内容失败:', error);
       
-      // 降级到原始方法
+      // 只有在API调用失败时才降级到原始方法
       try {
         const clipboardContent = await ipcRenderer.invoke('get-clipboard');
+        
         if (clipboardContent && clipboardContent.trim()) {
-          this.searchInput.value = clipboardContent.trim();
-          this.performSearch();
+          this.setContent(clipboardContent);
           this.autoFillEnabled = false; // 禁用自动填充
+          console.log('使用降级方法自动填充剪贴板内容（API调用失败）');
         }
       } catch (fallbackError) {
         console.error('降级获取剪贴板内容也失败:', fallbackError);
@@ -268,8 +370,7 @@ class MiniToolboxRenderer {
     }
     
     if (content && content.trim() && document.hasFocus()) {
-      this.searchInput.value = content.trim();
-      this.performSearch();
+      this.setContent(content);
     }
   }
 
@@ -303,8 +404,7 @@ class MiniToolboxRenderer {
     // 处理文本
     const pastedText = clipboardData.getData('text/plain');
     if (pastedText) {
-      this.searchInput.value = pastedText;
-      this.performSearch();
+      this.setContent(pastedText);
     }
   }
 
@@ -319,8 +419,7 @@ class MiniToolboxRenderer {
     } else {
       const droppedText = e.dataTransfer.getData('text/plain');
       if (droppedText) {
-        this.searchInput.value = droppedText;
-        this.performSearch();
+        this.setContent(droppedText);
       }
     }
   }
@@ -379,7 +478,7 @@ class MiniToolboxRenderer {
   }
 
   async performSearch() {
-    const query = this.searchInput.value.trim();
+    const query = this.actualContent.trim();
     
     if (!query) {
       const resultsContainer = document.getElementById('resultsContainer');
@@ -831,7 +930,7 @@ class MiniToolboxRenderer {
 
     // 构造输入数据 - 只传递可序列化的基本数据
     const base = this.currentContentAnalysis || { content: '', type: 'text', length: 0, lines: 0 };
-    let contentToSend = matchedBy === 'command' ? '' : base.content;
+    let contentToSend = matchedBy === 'command' ? '' : this.actualContent;
     // 若打开的是 JSON 插件，优先使用最近一次内联 JSON 作为内容
     if (pluginId === 'json-formatter' && this.lastInlineJsonContent) {
       contentToSend = this.lastInlineJsonContent;
@@ -945,6 +1044,172 @@ class MiniToolboxRenderer {
       'empty': '❓'
     };
     return icons[type] || '⚙️';
+  }
+
+  // 多行文本处理核心方法
+  setContent(content) {
+    if (!content) {
+      this.clearContent();
+      return;
+    }
+
+    this.actualContent = content;
+    const lines = content.split('\n');
+    const isMultiline = lines.length > 1 || content.includes('\n');
+
+    if (isMultiline) {
+      this.isMultilineMode = true;
+      this.showMultilinePreview(content);
+    } else {
+      this.isMultilineMode = false;
+      this.showSingleLineInput(content);
+    }
+
+    this.performSearch();
+  }
+
+  clearContent() {
+    this.actualContent = '';
+    this.isMultilineMode = false;
+    
+    if (this.searchInput) {
+      this.searchInput.value = '';
+      this.searchInput.style.display = 'block';
+    }
+    
+    if (this.multilinePreview) {
+      this.multilinePreview.style.display = 'none';
+    }
+    
+    if (this.editArea) {
+      this.editArea.style.display = 'none';
+    }
+    
+    // 设置编辑模式状态
+    this.isEditingMode = false;
+    
+    // 退出编辑模式
+    try {
+      ipcRenderer.send('set-editing-mode', false);
+    } catch {}
+    
+    this.performSearch();
+  }
+
+  showSingleLineInput(content) {
+    if (this.searchInput) {
+      this.searchInput.value = content.trim();
+      this.searchInput.style.display = 'block';
+    }
+    
+    if (this.multilinePreview) {
+      this.multilinePreview.style.display = 'none';
+    }
+    
+    if (this.editArea) {
+      this.editArea.style.display = 'none';
+    }
+  }
+
+  showMultilinePreview(content) {
+    const allLines = content.split('\n');
+    const nonEmptyLines = allLines.filter(line => line.trim());
+    
+    if (nonEmptyLines.length === 0) {
+      this.clearContent();
+      return;
+    }
+
+    const firstLine = nonEmptyLines[0].trim();
+    const lastLine = nonEmptyLines[nonEmptyLines.length - 1].trim();
+    const previewText = nonEmptyLines.length === 1 && allLines.length === 1 ? 
+      firstLine : `${firstLine} —— ${lastLine}`;
+
+    if (this.searchInput) {
+      this.searchInput.style.display = 'none';
+    }
+    
+    if (this.previewText) {
+      this.previewText.textContent = previewText;
+    }
+    
+    if (this.multilinePreview) {
+      this.multilinePreview.style.display = 'flex';
+    }
+    
+    if (this.editArea) {
+      this.editArea.style.display = 'none';
+    }
+  }
+
+  showEditArea() {
+    if (this.editTextarea) {
+      this.editTextarea.value = this.actualContent;
+      this.editTextarea.focus();
+      
+      // 自动调整高度
+      this.editTextarea.style.height = 'auto';
+      this.editTextarea.style.height = Math.min(this.editTextarea.scrollHeight, 300) + 'px';
+    }
+    
+    if (this.editArea) {
+      this.editArea.style.display = 'block';
+    }
+    
+    // 隐藏插件列表
+    const resultsContainer = document.getElementById('resultsContainer');
+    if (resultsContainer) {
+      resultsContainer.style.display = 'none';
+    }
+    
+    // 设置编辑模式状态
+    this.isEditingMode = true;
+    
+    // 通知主进程进入编辑模式，防止自动隐藏
+    try {
+      ipcRenderer.send('set-editing-mode', true);
+    } catch {}
+  }
+
+  hideEditArea() {
+    if (this.editArea) {
+      this.editArea.style.display = 'none';
+    }
+    
+    // 重新显示插件列表
+    const resultsContainer = document.getElementById('resultsContainer');
+    if (resultsContainer && this.actualContent.trim()) {
+      resultsContainer.style.display = 'block';
+    }
+    
+    // 设置编辑模式状态
+    this.isEditingMode = false;
+    
+    // 通知主进程退出编辑模式
+    try {
+      ipcRenderer.send('set-editing-mode', false);
+    } catch {}
+    
+    // 重新聚焦到搜索输入框或多行预览
+    if (this.isMultilineMode && this.multilinePreview) {
+      this.multilinePreview.setAttribute('tabindex', '0');
+      this.multilinePreview.focus();
+    } else if (this.searchInput) {
+      this.searchInput.focus();
+    }
+  }
+
+  saveMultilineContent() {
+    if (this.editTextarea) {
+      const newContent = this.editTextarea.value;
+      this.setContent(newContent);
+    }
+    this.hideEditArea();
+  }
+
+  // 获取当前的实际内容（用于插件）
+  getCurrentContent() {
+    return this.actualContent;
   }
 }
 
