@@ -319,6 +319,12 @@ class MiniToolbox {
         await this.executeHeadlessPlugin(plugin, inputData);
       } else {
         const pluginWindow = await this.createPluginWindow(plugin);
+        
+        // 清除主输入框内容（有UI插件执行时）
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.webContents.send('clear-input');
+        }
+        
         // 使用内容视图的 webContents 发送数据（避免发送到顶栏）
         setTimeout(() => {
           try {

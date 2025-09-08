@@ -94,6 +94,14 @@ class MiniToolboxRenderer {
       this.performSearch(); // 重新搜索以更新插件列表
     });
 
+    // 清除输入框内容
+    ipcRenderer.on('clear-input', () => {
+      if (this.searchInput) {
+        this.searchInput.value = '';
+        this.performSearch(); // 清除搜索结果
+      }
+    });
+
     // 接收插件列表结果
     ipcRenderer.on('plugin-list-results', (_e, payload) => {
       try {

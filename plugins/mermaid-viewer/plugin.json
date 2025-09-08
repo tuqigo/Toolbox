@@ -15,6 +15,7 @@
         { "type": "keyword", "value": "liuchengtu", "label": "sequ 关键字" },
         { "type": "regex", "match": "/sequenceDiagram/i", "label": "sequenceDiagram 语法" },
         { "type": "regex", "match": "/participant\\s+\\w+/i", "label": "participant 语法" },
+        { "type": "regex", "match": "/graph/i", "label": "graph  语法" },
         { "type": "regex", "match": "/\\w+\\s*->>?\\s*\\w+/", "label": "消息箭头语法" }
       ]
     }
