@@ -12,6 +12,11 @@ class MiniToolboxRenderer {
     this.ignoreNextClipboardChange = false; // 忽略下一次剪贴板变化的标记
     this.clipboardIgnoreTimeout = null; // 忽略超时定时器
     
+    // 输入内容管理
+    this.lastInputTime = 0; // 上次输入时间
+    this.inputClearTimeout = null; // 清除输入的超时定时器
+    this.autoFillEnabled = true; // 是否启用自动填充
+    
     this.init();
   }
 
@@ -46,6 +51,8 @@ class MiniToolboxRenderer {
   setupEventListeners() {
     // 输入事件
     this.searchInput.addEventListener('input', () => {
+      this.lastInputTime = Date.now(); // 记录输入时间
+      this.autoFillEnabled = false; // 用户手动输入时禁用自动填充
       this.performSearch();
     });
 
@@ -80,6 +87,8 @@ class MiniToolboxRenderer {
         const inInput = this.searchInput && (target === this.searchInput || this.searchInput.contains(target));
         const inResults = this.resultsList && (target === this.resultsList || this.resultsList.contains(target));
         if (!inInput && !inResults) {
+          // 记录隐藏时间，用于判断是否需要清除输入
+          this.lastInputTime = Date.now();
           ipcRenderer.send('hide-main-window');
         }
       } catch {}
@@ -99,6 +108,7 @@ class MiniToolboxRenderer {
       if (this.searchInput) {
         this.searchInput.value = '';
         this.performSearch(); // 清除搜索结果
+        this.autoFillEnabled = true; // 重置自动填充状态
       }
     });
 
@@ -193,11 +203,24 @@ class MiniToolboxRenderer {
 
   async focusInput() {
     if (this.searchInput) {
+      // 检查是否需要清除输入内容（超过3秒）
+      const now = Date.now();
+      const timeSinceLastInput = now - this.lastInputTime;
+      
+      if (timeSinceLastInput > 5000 && this.searchInput.value.trim()) {
+        // 超过5秒且有内容，清除输入
+        this.searchInput.value = '';
+        this.performSearch();
+        this.autoFillEnabled = true; // 重置自动填充状态
+      }
+      
       this.searchInput.focus();
       this.searchInput.select();
       
-      // 自动填充剪贴板内容
-      await this.autoFillClipboard();
+      // 只有在启用自动填充且输入框为空时才自动填充剪贴板内容
+      if (this.autoFillEnabled && !this.searchInput.value.trim()) {
+        await this.autoFillClipboard();
+      }
     }
   }
 
@@ -208,6 +231,7 @@ class MiniToolboxRenderer {
       if (recentClipboard && recentClipboard.trim()) {
         this.searchInput.value = recentClipboard.trim();
         this.performSearch();
+        this.autoFillEnabled = false; // 禁用自动填充，避免重复填充
         
         // 获取配置信息用于调试
         const config = await ipcRenderer.invoke('get-clipboard-config');
@@ -224,6 +248,7 @@ class MiniToolboxRenderer {
         if (clipboardContent && clipboardContent.trim()) {
           this.searchInput.value = clipboardContent.trim();
           this.performSearch();
+          this.autoFillEnabled = false; // 禁用自动填充
         }
       } catch (fallbackError) {
         console.error('降级获取剪贴板内容也失败:', fallbackError);
