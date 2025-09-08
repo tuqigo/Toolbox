@@ -21,6 +21,10 @@ function postJsonViaGateway({ hostname, path, body, port = 443 }) {
         path,
         port,
         method: 'POST',
+        // 某些内网环境证书为自签名/公司 CA，Node 默认不信任，这里关闭校验
+        rejectUnauthorized: false,
+        // 明确设置 SNI servername
+        servername: hostname,
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(payload)
@@ -33,11 +37,16 @@ function postJsonViaGateway({ hostname, path, body, port = 443 }) {
           resolve({ ok: res.statusCode === 200, status: res.statusCode, text: txt });
         });
       });
-      req.on('error', (e) => resolve({ ok: false, error: e.message }));
+      // 超时保护（15s）
+      req.setTimeout(15000, () => {
+        req.destroy(new Error('Request timeout'));
+      });
+      // 将错误信息也回传到 text，便于前端展示
+      req.on('error', (e) => resolve({ ok: false, error: e.message, text: e.message }));
       req.write(payload);
       req.end();
     } catch (e) {
-      resolve({ ok: false, error: e.message });
+      resolve({ ok: false, error: e.message, text: e.message });
     }
   });
 }
@@ -198,13 +207,13 @@ module.exports = {
     handleEnter: async (action, setList) => {
       const email = String(action.payload || '');
       const items = [
-        { title: 'Sit', hostname: SIT, path: '/api/i18n/auth/operation', expr: '@accountManager.getUserByEmail(#email)', param: 'email', data: email },
-        { title: 'Prod-test', hostname: PROD_TEST, path: '/api/i18n/auth/operation', expr: '@accountManager.getUserByEmail(#email)', param: 'email', data: email }
+        { title: 'Sit', description: 'sit环境查询', hostname: SIT, path: '/api/i18n/auth/operation', expr: `@accountManager.getUserByEmail('${email}')`, data: email },
+        { title: 'Prod-test', description: 'prod环境查询', hostname: PROD_TEST, path: '/api/i18n/auth/operation', expr: `@accountManager.getUserByEmail('${email}')`, data: email }
       ];
-      setList(items.map(i => ({ title: i.title, description: i.expr, hostname: i.hostname, path: i.path, param: i.param, data: i.data })));
+      setList(items);
     },
     handleSelect: async (action, itemData, callbackSetList) => {
-      const body = { calculate: itemData.description, paramList: [{ param: itemData.param, paramType: 'java.lang.String', paramJson: String(itemData.data || '') }] };
+      const body = { "calculate": itemData.expr};
       const { ok, text } = await postJsonViaGateway({ hostname: itemData.hostname, path: itemData.path, body });
       let json = null; try { json = JSON.parse(text || '{}'); } catch { }
       if (ok && json && json.c === '0') {
