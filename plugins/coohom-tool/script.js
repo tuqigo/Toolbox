@@ -1,16 +1,15 @@
 // Coohom 工具 - 脚本（兼容项目网关 API）
 const https = require('https');
-const { clipboard } = (() => { 
-  try { 
-    return require('electron'); 
-  } catch { 
-    return { clipboard: { writeText: () => {} } }; 
-  } 
+const { clipboard } = (() => {
+  try {
+    return require('electron');
+  } catch {
+    return { clipboard: { writeText: () => { } } };
+  }
 })();
 
 const SIT = 'auth-service-soa-sit.k8s-qunhe.qunhequnhe.com';
 const PROD_TEST = 'auth-service-soa-prod-test-sg.k8s-aws-sg-prod.qunhequnhe.com';
-const LOCAL = 'localhost';
 
 // 使用网关 API 调用
 function postJsonViaGateway({ hostname, path, body, port = 443 }) {
@@ -70,15 +69,15 @@ module.exports = {
     handleEnter: async (action, setList) => {
       const input = String(action.payload || '');
       const list = [
-        { title: 'Base64 编码', description: Buffer.from(input, 'utf8').toString('base64') },
-        { title: 'Base64 解码', description: (()=>{ try { return Buffer.from(input, 'base64').toString('utf8'); } catch { return '解码失败'; } })() }
+        { title: 'Base64 编码', description: Buffer.from(input, 'utf8').toString('base64'), data: 'encode' },
+        { title: 'Base64 解码', description: (() => { try { return Buffer.from(input, 'base64').toString('utf8'); } catch { return '解码失败'; } })(), data: 'decode' }
       ];
       setList(list);
     },
-    handleSelect: async (_action, item, _setList) => {
-      try { 
-        clipboard.writeText(item.description || ''); 
-      } catch {}
+    handleSelect: async (action, itemData, callbackSetList) => {
+      try {
+        clipboard.writeText(itemData.description || '');
+      } catch { }
     }
   },
 
@@ -87,15 +86,15 @@ module.exports = {
     handleEnter: async (action, setList) => {
       const input = String(action.payload || '');
       const list = [
-        { title: 'URL 编码', description: encodeURIComponent(input) },
-        { title: 'URL 解码', description: (()=>{ try { return decodeURIComponent(input); } catch { return '解码失败'; } })() }
+        { title: 'URL 编码', description: encodeURIComponent(input), data: encodeURIComponent(input) },
+        { title: 'URL 解码', description: (() => { try { return decodeURIComponent(input); } catch { return '解码失败'; } })(), data: decodeURIComponent(input) }
       ];
       setList(list);
     },
-    handleSelect: async (_action, item) => {
-      try { 
-        clipboard.writeText(item.description || ''); 
-      } catch {}
+    handleSelect: async (action, itemData, callbackSetList) => {
+      try {
+        clipboard.writeText(itemData.description || '');
+      } catch { }
     }
   },
 
@@ -120,13 +119,13 @@ module.exports = {
         setList([{ title: '解析失败', description: e.message }]);
       }
     },
-    handleSelect: async (action, item) => {
-      try { 
-        clipboard.writeText(item.description || ''); 
-      } catch {}
+    handleSelect: async (action, itemData, callbackSetList) => {
+      try {
+        clipboard.writeText(itemData.description || '');
+      } catch { }
       // 使用新的重定向方式
       if (action && typeof action.redirect === 'function') {
-        action.redirect('json-formatter', item.description || '');
+        action.redirect('json-formatter', itemData.description || '');
       }
     }
   },
@@ -137,15 +136,18 @@ module.exports = {
       const ip = String(action.payload || '').trim();
       const { ok, text, error } = await getJson(`https://ipinfo.io/${ip}/json`);
       const show = ok ? text : (error || '请求失败');
-      try { 
-        clipboard.writeText(show); 
-      } catch {}
+      try {
+        clipboard.writeText(show);
+      } catch { }
       setList([{ title: `IP: ${ip} 归属地`, description: show }]);
     },
-    handleSelect: async (_a, item) => { 
-      try { 
-        clipboard.writeText(item.description || ''); 
-      } catch {} 
+    handleSelect: async (action, itemData, callbackSetList) => {
+      console.log('itemData', itemData);
+      try {
+        action.redirect('json-formatter', itemData.description);
+      } catch (error) {
+        console.error('handleSelect error:', error);
+      }
     }
   },
 
@@ -155,16 +157,11 @@ module.exports = {
       const id = String(action.payload || '').trim();
       const { ok, text } = await getJson(`https://coops.qunhequnhe.com/api/dbv/common/obsconvert?id=${encodeURIComponent(id)}`);
       let d = '请求失败';
-      try { d = JSON.parse(text || '{}').d || d; } catch {}
-      try { 
-        clipboard.writeText(d); 
-      } catch {}
+      try { d = JSON.parse(text || '{}').d || d; } catch { }
+      try {
+        clipboard.writeText(d);
+      } catch { }
       setList([{ title: 'ObsId转换', description: String(d) }]);
-    },
-    handleSelect: async (_a, item) => { 
-      try { 
-        clipboard.writeText(item.description || ''); 
-      } catch {} 
     }
   },
 
@@ -178,20 +175,20 @@ module.exports = {
       ];
       setList(items.map(i => ({ title: i.title, description: i.expr, hostname: i.hostname, path: i.path, data: i.data })));
     },
-    handleSelect: async (_action, item, setList) => {
+    handleSelect: async (action, itemData, callbackSetList) => {
       const body = {
-        calculate: item.description,
-        paramList: [{ param: 'strings', paramType: 'java.lang.String', paramJson: String(item.data || '') }]
+        calculate: itemData.description,
+        paramList: [{ param: 'strings', paramType: 'java.lang.String', paramJson: String(itemData.data || '') }]
       };
-      const { ok, text } = await postJsonViaGateway({ hostname: item.hostname, path: item.path, body });
-      let json = null; try { json = JSON.parse(text || '{}'); } catch {}
+      const { ok, text } = await postJsonViaGateway({ hostname: itemData.hostname, path: itemData.path, body });
+      let json = null; try { json = JSON.parse(text || '{}'); } catch { }
       if (ok && json && json.c === '0') {
-        try { 
-          clipboard.writeText(json.d || ''); 
-        } catch {}
-        setList([{ title: '计算成功', description: typeof json.d === 'string' ? json.d : JSON.stringify(json.d) }]);
+        try {
+          clipboard.writeText(json.d || '');
+        } catch { }
+        callbackSetList([{ title: '计算成功', description: typeof json.d === 'string' ? json.d : JSON.stringify(json.d) }]);
       } else {
-        setList([{ title: '计算失败', description: json ? JSON.stringify(json.m || json) : (text || 'error') }]);
+        callbackSetList([{ title: '计算失败', description: json ? JSON.stringify(json.m || json) : (text || 'error') }]);
       }
     }
   },
@@ -206,17 +203,17 @@ module.exports = {
       ];
       setList(items.map(i => ({ title: i.title, description: i.expr, hostname: i.hostname, path: i.path, param: i.param, data: i.data })));
     },
-    handleSelect: async (_action, item, setList) => {
-      const body = { calculate: item.description, paramList: [{ param: item.param, paramType: 'java.lang.String', paramJson: String(item.data || '') }] };
-      const { ok, text } = await postJsonViaGateway({ hostname: item.hostname, path: item.path, body });
-      let json = null; try { json = JSON.parse(text || '{}'); } catch {}
+    handleSelect: async (action, itemData, callbackSetList) => {
+      const body = { calculate: itemData.description, paramList: [{ param: itemData.param, paramType: 'java.lang.String', paramJson: String(itemData.data || '') }] };
+      const { ok, text } = await postJsonViaGateway({ hostname: itemData.hostname, path: itemData.path, body });
+      let json = null; try { json = JSON.parse(text || '{}'); } catch { }
       if (ok && json && json.c === '0') {
-        try { 
-          clipboard.writeText(String(json.d && json.d.kujialeId || '')); 
-        } catch {}
-        setList([{ title: '计算成功', description: JSON.stringify(json.d) }]);
+        try {
+          clipboard.writeText(String(json.d && json.d.kujialeId || ''));
+        } catch { }
+        callbackSetList([{ title: '计算成功', description: JSON.stringify(json.d) }]);
       } else {
-        setList([{ title: '计算失败', description: json ? JSON.stringify(json.m || json) : (text || 'error') }]);
+        callbackSetList([{ title: '计算失败', description: json ? JSON.stringify(json.m || json) : (text || 'error') }]);
       }
     }
   },
@@ -231,14 +228,14 @@ module.exports = {
       ];
       setList(items.map(i => ({ title: i.title, description: i.expr, hostname: i.hostname, path: i.path, param: i.param, data: i.data })));
     },
-    handleSelect: async (_action, item, setList) => {
-      const body = { calculate: item.description, paramList: [{ param: item.param, paramType: 'java.lang.String', paramJson: String(item.data || '') }] };
-      const { ok, text } = await postJsonViaGateway({ hostname: item.hostname, path: item.path, body });
-      let json = null; try { json = JSON.parse(text || '{}'); } catch {}
+    handleSelect: async (action, itemData, callbackSetList) => {
+      const body = { calculate: itemData.description, paramList: [{ param: itemData.param, paramType: 'java.lang.String', paramJson: String(itemData.data || '') }] };
+      const { ok, text } = await postJsonViaGateway({ hostname: itemData.hostname, path: itemData.path, body });
+      let json = null; try { json = JSON.parse(text || '{}'); } catch { }
       if (ok && json && json.c === '0') {
-        setList([{ title: '计算成功', description: `${item.data} -> ${JSON.stringify(json.d)}` }]);
+        callbackSetList([{ title: '计算成功', description: `${itemData.data} -> ${JSON.stringify(json.d)}` }]);
       } else {
-        setList([{ title: '计算失败', description: json ? JSON.stringify(json.m || json) : (text || 'error') }]);
+        callbackSetList([{ title: '计算失败', description: json ? JSON.stringify(json.m || json) : (text || 'error') }]);
       }
     }
   },
@@ -253,17 +250,17 @@ module.exports = {
       ];
       setList(items.map(i => ({ title: i.title, description: i.expr, hostname: i.hostname, path: i.path, param: i.param, data: i.data })));
     },
-    handleSelect: async (_action, item, setList) => {
-      const body = { calculate: item.description, paramList: [{ param: item.param, paramType: 'java.lang.String', paramJson: String(item.data || '') }] };
-      const { ok, text } = await postJsonViaGateway({ hostname: item.hostname, path: item.path, body });
-      let json = null; try { json = JSON.parse(text || '{}'); } catch {}
+    handleSelect: async (action, itemData, callbackSetList) => {
+      const body = { calculate: itemData.description, paramList: [{ param: itemData.param, paramType: 'java.lang.String', paramJson: String(itemData.data || '') }] };
+      const { ok, text } = await postJsonViaGateway({ hostname: itemData.hostname, path: itemData.path, body });
+      let json = null; try { json = JSON.parse(text || '{}'); } catch { }
       if (ok && json && json.c === '0') {
-        try { 
-          clipboard.writeText(String(json.d || '')); 
-        } catch {}
-        setList([{ title: '计算成功', description: JSON.stringify(json.d) }]);
+        try {
+          clipboard.writeText(String(json.d || ''));
+        } catch { }
+        callbackSetList([{ title: '计算成功', description: JSON.stringify(json.d) }]);
       } else {
-        setList([{ title: '计算失败', description: json ? JSON.stringify(json.m || json) : (text || 'error') }]);
+        callbackSetList([{ title: '计算失败', description: json ? JSON.stringify(json.m || json) : (text || 'error') }]);
       }
     }
   },
@@ -278,17 +275,17 @@ module.exports = {
       ];
       setList(items.map(i => ({ title: i.title, description: i.expr, hostname: i.hostname, path: i.path, param: i.param, data: i.data })));
     },
-    handleSelect: async (_action, item, setList) => {
-      const body = { calculate: item.description, paramList: [{ param: item.param, paramType: 'java.lang.String', paramJson: String(item.data || '') }] };
-      const { ok, text } = await postJsonViaGateway({ hostname: item.hostname, path: item.path, body });
-      let json = null; try { json = JSON.parse(text || '{}'); } catch {}
+    handleSelect: async (action, itemData, callbackSetList) => {
+      const body = { calculate: itemData.description, paramList: [{ param: itemData.param, paramType: 'java.lang.String', paramJson: String(itemData.data || '') }] };
+      const { ok, text } = await postJsonViaGateway({ hostname: itemData.hostname, path: itemData.path, body });
+      let json = null; try { json = JSON.parse(text || '{}'); } catch { }
       if (ok && json && json.c === '0') {
-        try { 
-          clipboard.writeText(String(json.d && json.d.email || '')); 
-        } catch {}
-        setList([{ title: '计算成功', description: JSON.stringify(json.d) }]);
+        try {
+          clipboard.writeText(String(json.d && json.d.email || ''));
+        } catch { }
+        callbackSetList([{ title: '计算成功', description: JSON.stringify(json.d) }]);
       } else {
-        setList([{ title: '计算失败', description: json ? JSON.stringify(json.m || json) : (text || 'error') }]);
+        callbackSetList([{ title: '计算失败', description: json ? JSON.stringify(json.m || json) : (text || 'error') }]);
       }
     }
   },
@@ -299,22 +296,21 @@ module.exports = {
       const items = [
         { title: 'Sit', hostname: SIT, path: '/api/i18n/auth/operation', placeholder: 'SPEL 表达式，如 1+1' },
         { title: 'Prod-test', hostname: PROD_TEST, path: '/api/i18n/auth/operation', placeholder: '谨慎调用' },
-        { title: 'LocalHost', hostname: LOCAL, path: '/api/i18n/auth/operation', placeholder: '本地调试' }
       ];
       setList(items.map(i => ({ title: i.title, description: i.placeholder, hostname: i.hostname, path: i.path })));
     },
-    handleSelect: async (action, item, setList) => {
+    handleSelect: async (action, itemData, callbackSetList) => {
       const expr = String(action.payload || '').trim();
       const body = { calculate: expr };
-      const { ok, text } = await postJsonViaGateway({ hostname: item.hostname, path: item.path, body });
-      let json = null; try { json = JSON.parse(text || '{}'); } catch {}
+      const { ok, text } = await postJsonViaGateway({ hostname: itemData.hostname, path: itemData.path, body });
+      let json = null; try { json = JSON.parse(text || '{}'); } catch { }
       if (ok && json && json.c === '0') {
-        try { 
-          clipboard.writeText(String(json.d || '')); 
-        } catch {}
-        setList([{ title: '计算成功', description: JSON.stringify(json.d) }]);
+        try {
+          clipboard.writeText(String(json.d || ''));
+        } catch { }
+        callbackSetList([{ title: '计算成功', description: JSON.stringify(json.d) }]);
       } else {
-        setList([{ title: '计算失败', description: json ? JSON.stringify(json.m || json) : (text || 'error') }]);
+        callbackSetList([{ title: '计算失败', description: json ? JSON.stringify(json.m || json) : (text || 'error') }]);
       }
     }
   }

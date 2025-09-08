@@ -797,8 +797,8 @@ class MiniToolboxRenderer {
 
     if (process.env.NODE_ENV === 'development') console.log('执行插件:', pluginId, '功能:', featureCode, inputData);
 
-    // 点击某个插件后，仅保留该插件卡片，隐藏其他结果
-    this.showOnlyPluginCard(pluginId);
+    // 点击某个feature后，仅保留该feature卡片，隐藏其他结果
+    this.showOnlyFeatureCard(pluginId, featureCode);
 
     // 发送执行插件请求
     ipcRenderer.send('execute-plugin', pluginId, inputData);
@@ -809,19 +809,44 @@ class MiniToolboxRenderer {
     }
   }
 
-  // 仅保留指定插件的卡片
-  showOnlyPluginCard(pluginId) {
+  // 仅保留指定feature的卡片
+  showOnlyFeatureCard(pluginId, featureCode) {
     try {
       const all = this.resultsList.querySelectorAll('.result-item');
       all.forEach(el => {
-        if (el.dataset && el.dataset.pluginId !== pluginId) {
-          el.remove();
+        if (el.dataset) {
+          // 如果是不同的插件，直接移除
+          if (el.dataset.pluginId !== pluginId) {
+            el.remove();
+            return;
+          }
+          
+          // 如果是同一个插件但不同的feature，也移除
+          const cardFeatureCode = el.dataset.featureCode || '';
+          if (featureCode && cardFeatureCode && cardFeatureCode !== featureCode) {
+            el.remove();
+            return;
+          }
+          
+          // 如果当前选中的feature有featureCode，但某个卡片没有featureCode（老式插件），也移除
+          if (featureCode && !cardFeatureCode) {
+            el.remove();
+            return;
+          }
         }
       });
+      
       // 重置选中态为首项（唯一项）
       this.selectedIndex = 0;
       this.updateSelection();
-    } catch {}
+    } catch (error) {
+      console.warn('showOnlyFeatureCard error:', error);
+    }
+  }
+
+  // 兼容性：保留原有的showOnlyPluginCard方法，用于没有featureCode的场景
+  showOnlyPluginCard(pluginId) {
+    this.showOnlyFeatureCard(pluginId, null);
   }
 
   renderInlineResult(fromPluginId, text, isJson) {
