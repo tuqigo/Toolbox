@@ -84,6 +84,115 @@ sequenceDiagram
   Note over M: 任何 writeText 都会短暂设置忽略下一次剪贴板变化
 ```
 
+### 详细代码流程图
+
+```mermaid
+graph TB
+    A[应用启动 main.js] --> B[初始化核心模块]
+    B --> C[ConfigStore 加载配置]
+    B --> D[PluginManager 扫描插件]
+    B --> E[创建主窗口]
+    B --> F[注册全局快捷键]
+    B --> G[启动剪贴板监听]
+    
+    C --> C1[读取 config.json]
+    C1 --> C2[合并默认配置]
+    C2 --> C3[应用UI主题和窗口设置]
+    
+    D --> D1[扫描 plugins 目录]
+    D1 --> D2[解析 plugin.json]
+    D2 --> D3[编译匹配规则]
+    D3 --> D4[构建插件索引]
+    
+    H[用户输入] --> I[InputAnalyzer 分析内容]
+    I --> J[Matcher 匹配插件]
+    J --> K[显示匹配结果]
+    K --> L[用户选择插件]
+    L --> M[执行插件]
+    
+    M --> N{插件类型}
+    N -->|有UI插件| O[WindowManager 创建窗口]
+    N -->|无UI插件| P[直接执行脚本]
+    
+    O --> Q[应用主题到插件窗口]
+    P --> R[返回结果到主界面]
+    
+    S[配置变更] --> T[IPC 通信]
+    T --> U[ConfigStore 更新配置]
+    U --> V[实时应用到所有窗口]
+    V --> W[更新托盘菜单]
+```
+
+### 配置刷新时序图
+
+```mermaid
+sequenceDiagram
+    participant U as 用户操作
+    participant T as 托盘菜单
+    participant M as 主进程
+    participant C as ConfigStore
+    participant W as WindowManager
+    participant R as 渲染进程
+    
+    U->>T: 点击配置选项
+    T->>M: 调用配置方法
+    M->>C: 更新配置值
+    C->>C: 保存到文件
+    C-->>M: 返回新配置
+    
+    M->>W: 应用主题变更
+    W->>W: 更新所有窗口
+    W->>R: 广播主题消息
+    
+    M->>T: 更新托盘菜单
+    T->>T: 重建菜单项
+    
+    Note over M,R: 配置立即生效，无需重启
+```
+
+
+### 插件匹配和执行时序图
+
+```mermaid
+sequenceDiagram
+    participant U as 用户输入
+    participant R as 渲染进程
+    participant M as 主进程
+    participant I as InputAnalyzer
+    participant Ma as Matcher
+    participant P as PluginManager
+    participant W as WindowManager
+    
+    U->>R: 输入内容
+    R->>M: IPC: analyze-content
+    M->>I: 分析输入类型
+    I-->>M: 返回内容分析结果
+    M-->>R: 返回分析结果
+    
+    R->>M: IPC: match-plugins
+    M->>Ma: 匹配插件
+    Ma->>P: 获取插件规则
+    P-->>Ma: 返回编译规则
+    Ma->>Ma: 规则匹配和评分
+    Ma-->>M: 返回匹配结果
+    M-->>R: 返回插件列表
+    
+    R->>R: 显示匹配结果
+    U->>R: 选择插件
+    R->>M: IPC: execute-plugin
+    
+    alt 有UI插件
+        M->>W: 创建插件窗口
+        W->>W: 应用主题配置
+        W-->>M: 返回窗口实例
+        M->>R: 发送输入数据到插件
+    else 无UI插件
+        M->>M: 执行插件脚本
+        M->>R: 返回执行结果
+    end
+```
+
+
 ## 目录结构
 
 ```
