@@ -289,6 +289,10 @@ module.exports = {
       setList(items.map(i => ({ title: i.title, description: i.expr, hostname: i.hostname, path: i.path, param: i.param, data: i.data })));
     },
     handleSelect: async (action, itemData, callbackSetList) => {
+      if (itemData && itemData.description.includes('email')) {
+        action.redirect('json-formatter', itemData.description);
+        return;
+      }
       const body = { calculate: itemData.description, paramList: [{ param: itemData.param, paramType: 'java.lang.String', paramJson: String(itemData.data || '') }] };
       const { ok, text } = await postJsonViaGateway({ hostname: itemData.hostname, path: itemData.path, body });
       let json = null; try { json = JSON.parse(text || '{}'); } catch { }

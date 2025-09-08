@@ -341,6 +341,12 @@ class MiniToolboxRenderer {
     results.forEach((item, index) => {
       if (index === this.selectedIndex) {
         item.classList.add('selected');
+        // 自动滚动到选中项，确保其在可见区域内
+        item.scrollIntoView({
+          behavior: 'smooth',
+          block: 'nearest',
+          inline: 'nearest'
+        });
       } else {
         item.classList.remove('selected');
       }
@@ -486,14 +492,20 @@ class MiniToolboxRenderer {
       resultsContainer.style.display = 'block';
     }
 
-    // 添加点击事件（注意与列表项点击的冒泡冲突）
-    this.resultsList.querySelectorAll('.result-item').forEach(item => {
+    // 添加点击事件和鼠标悬停事件
+    this.resultsList.querySelectorAll('.result-item').forEach((item, index) => {
       item.addEventListener('click', (e) => {
         // 如果点击发生在该卡片内部的列表区域，则不触发执行插件，避免覆盖 handleSelect 结果
         if (e && e.target && e.target.closest && e.target.closest('.plugin-list-results')) {
           return;
         }
         this.executeSelectedPlugin(item);
+      });
+      
+      // 鼠标悬停时更新选中状态
+      item.addEventListener('mouseenter', () => {
+        this.selectedIndex = index;
+        this.updateSelection();
       });
     });
   }

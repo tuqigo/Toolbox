@@ -105,8 +105,8 @@ body {
 }
 
 .results-list {
-    max-height: none; /* 由子列表自己滚动，外层不滚动 */
-    overflow: visible;
+    max-height: 300px; /* 限制最大高度，约4-5个结果项 */
+    overflow-y: auto; /* 添加垂直滚动 */
     min-height: 0;
 }
 
@@ -125,8 +125,9 @@ body {
 
 .result-item:hover,
 .result-item.selected {
-    background: var(--mt-hover, rgba(0, 122, 255, 0.1));
+    background: var(--mt-hover, rgba(0, 0, 0, 0.08));
 }
+
 
 .result-icon {
     width: 32px;
@@ -182,22 +183,25 @@ body {
     flex-shrink: 0;
 }
 
-/* 滚动条样式 */
+/* 隐藏结果列表的滚动条，但保留滚轮功能 */
 .results-list::-webkit-scrollbar {
-    width: 6px;
+    width: 0px;
+    height: 0px;
+    background: transparent;
 }
 
 .results-list::-webkit-scrollbar-track {
-    background: var(--mt-scrollbar-track, transparent);
+    background: transparent;
 }
 
 .results-list::-webkit-scrollbar-thumb {
-    background: var(--mt-scrollbar-thumb, rgba(0, 0, 0, 0.2));
-    border-radius: 3px;
+    background: transparent;
 }
 
-.results-list::-webkit-scrollbar-thumb:hover {
-    background: var(--mt-scrollbar-thumb-hover, rgba(0, 0, 0, 0.3));
+/* Firefox 滚动条隐藏 */
+.results-list {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
 }
 
 /* 插件子列表（卡片内的列表） */
