@@ -213,7 +213,11 @@ module.exports = {
       setList(items);
     },
     handleSelect: async (action, itemData, callbackSetList) => {
-      const body = { "calculate": itemData.expr};
+      if (itemData && itemData.description.includes('email')) {
+        action.redirect('json-formatter', itemData.description);
+        return;
+      }
+      const body = { "calculate": itemData.expr };
       const { ok, text } = await postJsonViaGateway({ hostname: itemData.hostname, path: itemData.path, body });
       let json = null; try { json = JSON.parse(text || '{}'); } catch { }
       if (ok && json && json.c === '0') {
@@ -291,31 +295,6 @@ module.exports = {
       if (ok && json && json.c === '0') {
         try {
           clipboard.writeText(String(json.d && json.d.email || ''));
-        } catch { }
-        callbackSetList([{ title: '计算成功', description: JSON.stringify(json.d) }]);
-      } else {
-        callbackSetList([{ title: '计算失败', description: json ? JSON.stringify(json.m || json) : (text || 'error') }]);
-      }
-    }
-  },
-
-  // SPEL 计算（可输入表达式）
-  'spel.id': {
-    handleEnter: async (_action, setList) => {
-      const items = [
-        { title: 'Sit', hostname: SIT, path: '/api/i18n/auth/operation', placeholder: 'SPEL 表达式，如 1+1' },
-        { title: 'Prod-test', hostname: PROD_TEST, path: '/api/i18n/auth/operation', placeholder: '谨慎调用' },
-      ];
-      setList(items.map(i => ({ title: i.title, description: i.placeholder, hostname: i.hostname, path: i.path })));
-    },
-    handleSelect: async (action, itemData, callbackSetList) => {
-      const expr = String(action.payload || '').trim();
-      const body = { calculate: expr };
-      const { ok, text } = await postJsonViaGateway({ hostname: itemData.hostname, path: itemData.path, body });
-      let json = null; try { json = JSON.parse(text || '{}'); } catch { }
-      if (ok && json && json.c === '0') {
-        try {
-          clipboard.writeText(String(json.d || ''));
         } catch { }
         callbackSetList([{ title: '计算成功', description: JSON.stringify(json.d) }]);
       } else {

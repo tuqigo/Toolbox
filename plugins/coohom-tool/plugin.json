@@ -4,16 +4,6 @@
   "logo": "🔧",
   "features": [
     {
-      "code": "spel.id",
-      "explain": "SPEL 计算",
-      "cmds": [
-        {
-          "type": "keyword",
-          "value": "spel"
-        }
-      ]
-    },
-    {
       "code": "obs.id",
       "explain": "OBS 自动转换",
       "cmds": [
@@ -63,7 +53,8 @@
         {
           "type": "keyword",
           "value": "encrypt"
-        }
+        },   
+        { "type": "prefix", "value": "5 r>", "label": "5 r> 前缀" }
       ]
     },
     {

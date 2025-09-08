@@ -21,9 +21,7 @@
         { "type": "keyword", "value": "设置" },
         { "type": "keyword", "value": "配置" },
         { "type": "keyword", "value": "settings" },
-        { "type": "keyword", "value": "config" },
-        { "type": "prefix", "value": "设置 " },
-        { "type": "prefix", "value": "配置 " }
+        { "type": "keyword", "value": "config" }
       ]
     }
   ]
