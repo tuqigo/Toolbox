@@ -69,8 +69,8 @@ module.exports = {
     handleEnter: async (action, setList) => {
       const input = String(action.payload || '');
       const list = [
-        { title: 'Base64 编码', description: Buffer.from(input, 'utf8').toString('base64'), data: 'encode' },
-        { title: 'Base64 解码', description: (() => { try { return Buffer.from(input, 'base64').toString('utf8'); } catch { return '解码失败'; } })(), data: 'decode' }
+        { title: 'Base64 编码', description: Buffer.from(input, 'utf8').toString('base64') },
+        { title: 'Base64 解码', description: (() => { try { return Buffer.from(input, 'base64').toString('utf8'); } catch { return '解码失败'; } })() }
       ];
       setList(list);
     },
@@ -86,8 +86,8 @@ module.exports = {
     handleEnter: async (action, setList) => {
       const input = String(action.payload || '');
       const list = [
-        { title: 'URL 编码', description: encodeURIComponent(input), data: encodeURIComponent(input) },
-        { title: 'URL 解码', description: (() => { try { return decodeURIComponent(input); } catch { return '解码失败'; } })(), data: decodeURIComponent(input) }
+        { title: 'URL 编码', description: encodeURIComponent(input) },
+        { title: 'URL 解码', description: (() => { try { return decodeURIComponent(input); } catch { return '解码失败'; } })() }
       ];
       setList(list);
     },

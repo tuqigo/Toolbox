@@ -20,7 +20,7 @@
         {
           "type": "regex",
           "label": "obs",
-          "match": "/^\\d{6,13}$/",
+          "match": "/^[0-9A-Za-z]{6,13}$/",
           "minLength": 6,
           "maxLength": 13
         }

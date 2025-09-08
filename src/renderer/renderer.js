@@ -401,7 +401,9 @@ class MiniToolboxRenderer {
       root.style.setProperty('--mt-panel', pll.panel || (eff==='dark' ? '#2b2d31' : 'rgba(255,255,255,0.95)'));
       root.style.setProperty('--mt-fg', pll.fg || (eff==='dark' ? '#e6e7ea' : '#333'));
       root.style.setProperty('--mt-border', pll.border || (eff==='dark' ? '#3a3b41' : 'rgba(0,0,0,0.08)'));
-      root.style.setProperty('--mt-hover', pll.hover || (eff==='dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'));
+      // 调整 hover 对比度，并新增强 hover 变量，提升暗黑/明亮模式下的可感知度
+      root.style.setProperty('--mt-hover', pll.hover || (eff==='dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'));
+      root.style.setProperty('--mt-hover-strong', pll.hoverStrong || (eff==='dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'));
       root.style.setProperty('--mt-selected', pll.selected || (eff==='dark' ? 'rgba(0,122,255,0.22)' : 'rgba(0,122,255,0.12)'));
       root.style.setProperty('--mt-iconbg', pll.iconBg || (eff==='dark' ? '#3a3b41' : '#f1f1f3'));
       root.style.setProperty('--mt-scrollbar-thumb', eff==='dark' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)');
@@ -654,22 +656,28 @@ class MiniToolboxRenderer {
       itemEl.className = 'list-item';
       itemEl.style.padding = '8px 12px';
       itemEl.style.borderBottom = index < items.length - 1 ? '1px solid var(--mt-border)' : 'none';
-      itemEl.style.cursor = item.data ? 'pointer' : 'default';
+      // 交互控制：默认可点击，若明确 canClick===false 则禁用
+      const isClickable = item.canClick !== false;
+      itemEl.style.cursor = isClickable ? 'pointer' : 'not-allowed';
       itemEl.style.transition = 'background-color 0.2s';
 
-      if (item.data) {
-        itemEl.addEventListener('mouseenter', () => {
-          itemEl.style.background = 'var(--mt-hover)';
-        });
-        itemEl.addEventListener('mouseleave', () => {
+      // 悬停效果：可点击使用强 hover，不可点击弱化并去除悬停背景
+      itemEl.addEventListener('mouseenter', () => {
+        if (isClickable) {
+          itemEl.style.background = 'var(--mt-hover-strong)';
+        } else {
           itemEl.style.background = 'transparent';
-        });
-        itemEl.addEventListener('click', (e) => {
-          // 阻止冒泡，避免触发外层卡片的点击（执行插件）
-          if (e && e.stopPropagation) e.stopPropagation();
-          this.handleListItemSelect(pluginId, item, inputData);
-        });
-      }
+        }
+      });
+      itemEl.addEventListener('mouseleave', () => {
+        itemEl.style.background = 'transparent';
+      });
+      itemEl.addEventListener('click', (e) => {
+        // 阻止冒泡，避免触发外层卡片的点击（执行插件）
+        if (e && e.stopPropagation) e.stopPropagation();
+        if (!isClickable) return;
+        this.handleListItemSelect(pluginId, item, inputData);
+      });
 
       const titleEl = document.createElement('div');
       titleEl.style.fontWeight = '500';
@@ -683,6 +691,12 @@ class MiniToolboxRenderer {
       descEl.style.color = 'var(--mt-text-muted)';
       descEl.style.wordBreak = 'break-word';
       descEl.textContent = item.description || '';
+      
+      // 不可点击的视觉区分
+      if (!isClickable) {
+        itemEl.style.opacity = '0.6';
+        titleEl.style.color = 'var(--mt-text-muted)';
+      }
 
       itemEl.appendChild(titleEl);
       itemEl.appendChild(descEl);
@@ -702,9 +716,10 @@ class MiniToolboxRenderer {
       });
     }
     
-    if (itemData && itemData.data) {
-      ipcRenderer.send('plugin-list-select', pluginId, itemData, inputData);
-    }
+    // 发送选择事件：优先遵循 canClick 逻辑；可点击时放宽对 data 的限制，交由插件端决定
+    const canClick = itemData && itemData.canClick !== false;
+    if (!canClick) return;
+    ipcRenderer.send('plugin-list-select', pluginId, itemData, inputData);
   }
 
   // 处理插件重定向
