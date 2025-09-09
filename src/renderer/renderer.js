@@ -1228,13 +1228,40 @@ class MiniToolboxRenderer {
     let startX = 0;
     let startY = 0;
     let hasMoved = false;
+    let dragThreshold = 8; // 增加拖拽阈值，避免误触发
+    let timeThreshold = 150; // 减少时间阈值，提高响应性
 
     if (!this.searchInput) return;
+
+    // 清理函数，确保事件监听器被正确移除
+    const cleanup = () => {
+      if (isDragging) {
+        isDragging = false;
+        this._isDragging = false;
+        document.body.style.userSelect = '';
+        
+        // 通知主进程结束拖拽
+        try {
+          ipcRenderer.send('window-drag-end');
+        } catch (error) {
+          console.error('发送拖拽结束事件失败:', error);
+        }
+      }
+    };
+
+    // 页面卸载时清理
+    window.addEventListener('beforeunload', cleanup);
+    window.addEventListener('unload', cleanup);
 
     // 在输入框上按住左键开始拖拽
     this.searchInput.addEventListener('mousedown', (e) => {
       // 只响应左键
       if (e.button !== 0) return;
+      
+      // 如果点击的是输入框内的文本选择，不启动拖拽
+      if (this.searchInput.selectionStart !== this.searchInput.selectionEnd) {
+        return;
+      }
       
       dragStartTime = Date.now();
       startX = e.screenX;
@@ -1247,12 +1274,31 @@ class MiniToolboxRenderer {
         const deltaY = Math.abs(moveEvent.screenY - startY);
         const timeDiff = Date.now() - dragStartTime;
         
-        // 如果移动距离超过5px或者按住超过200ms，开始拖拽
-        if (!isDragging && (deltaX > 5 || deltaY > 5 || timeDiff > 200)) {
+        // 修正拖拽触发逻辑：只有移动距离足够大才触发，时间作为辅助条件
+        if (!isDragging && (deltaX > dragThreshold || deltaY > dragThreshold)) {
           isDragging = true;
           hasMoved = true;
-          this._isDragging = true; // 设置渲染器拖拽状态
+          this._isDragging = true;
           document.body.style.userSelect = 'none';
+          
+          // 阻止输入框的默认行为
+          this.searchInput.blur();
+          
+          // 通知主进程开始拖拽
+          try {
+            ipcRenderer.send('window-drag-start', { x: startX, y: startY });
+          } catch (error) {
+            console.error('发送拖拽开始事件失败:', error);
+          }
+        } else if (!isDragging && timeDiff > timeThreshold && (deltaX > 2 || deltaY > 2)) {
+          // 或者按住时间足够长且有轻微移动
+          isDragging = true;
+          hasMoved = true;
+          this._isDragging = true;
+          document.body.style.userSelect = 'none';
+          
+          // 阻止输入框的默认行为
+          this.searchInput.blur();
           
           // 通知主进程开始拖拽
           try {
@@ -1272,9 +1318,11 @@ class MiniToolboxRenderer {
       };
 
       const handleMouseUp = () => {
+        const wasDragging = isDragging;
+        
         if (isDragging) {
           isDragging = false;
-          this._isDragging = false; // 重置渲染器拖拽状态
+          this._isDragging = false;
           document.body.style.userSelect = '';
           
           // 通知主进程结束拖拽
@@ -1285,27 +1333,27 @@ class MiniToolboxRenderer {
           }
         }
         
-        // 如果没有移动，说明是正常点击，让输入框正常处理
-        if (!hasMoved) {
-          // 让输入框获得焦点
+        // 如果没有拖拽，说明是正常点击，让输入框正常处理
+        if (!wasDragging && !hasMoved) {
+          // 延迟聚焦，确保拖拽状态已清理
           setTimeout(() => {
-            this.searchInput.focus();
-          }, 0);
+            if (this.searchInput && !this._isDragging) {
+              this.searchInput.focus();
+            }
+          }, 10);
         }
         
         // 清理事件监听器
         document.removeEventListener('mousemove', handleMouseMove);
         document.removeEventListener('mouseup', handleMouseUp);
+        document.removeEventListener('mouseleave', handleMouseUp);
       };
 
       // 添加全局事件监听器
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
-      
-      // 如果开始拖拽，阻止默认行为
-      if (isDragging) {
-        e.preventDefault();
-      }
+      // 鼠标离开窗口时也结束拖拽
+      document.addEventListener('mouseleave', handleMouseUp);
     });
   }
 }

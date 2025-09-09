@@ -320,8 +320,23 @@ class MiniToolbox {
     }
     this._lastToggleTime = timestamp;
     
-    if (this.mainWindow) {
+    // 防止并发操作
+    if (this._isToggling) {
+      return;
+    }
+    this._isToggling = true;
+    
+    try {
+      if (!this.mainWindow) {
+        return;
+      }
+
       const currentScreen = this.getCurrentScreen();
+      if (!currentScreen) {
+        console.warn('无法获取当前屏幕信息');
+        return;
+      }
+
       const isOnCurrentScreen = this.isWindowOnScreen(currentScreen);
       
       // 如果窗口在当前屏幕显示，则隐藏
@@ -333,15 +348,24 @@ class MiniToolbox {
       // 如果窗口在其他屏幕显示，先隐藏再在当前屏幕显示
       if (this.mainWindow.isVisible() && !isOnCurrentScreen) {
         this.hideMainWindow();
-        // 等待隐藏动画完成后再显示
-        setTimeout(async () => {
+        // 等待隐藏动画完成后再显示，使用Promise避免竞态条件
+        await new Promise(resolve => setTimeout(resolve, 100));
+        // 再次检查屏幕，防止用户在等待期间移动鼠标
+        const finalScreen = this.getCurrentScreen();
+        if (finalScreen) {
           await this.showInputWindow();
-        }, 100);
+        }
         return;
       }
       
       // 窗口未显示，直接在当前屏幕显示
       await this.showInputWindow();
+    } catch (error) {
+      if (!this.isQuiet) {
+        console.error('切换输入窗口失败:', error);
+      }
+    } finally {
+      this._isToggling = false;
     }
   }
 
@@ -415,9 +439,25 @@ class MiniToolbox {
 
   // 获取当前鼠标所在的屏幕
   getCurrentScreen() {
-    const { screen } = require('electron');
-    const cursorPoint = screen.getCursorScreenPoint();
-    return screen.getDisplayNearestPoint(cursorPoint);
+    try {
+      const { screen } = require('electron');
+      const cursorPoint = screen.getCursorScreenPoint();
+      return screen.getDisplayNearestPoint(cursorPoint);
+    } catch (error) {
+      if (!this.isQuiet) {
+        console.error('获取当前屏幕失败:', error);
+      }
+      // 返回主显示器作为备选
+      try {
+        const { screen } = require('electron');
+        return screen.getPrimaryDisplay();
+      } catch (fallbackError) {
+        if (!this.isQuiet) {
+          console.error('获取主显示器失败:', fallbackError);
+        }
+        return null;
+      }
+    }
   }
 
   // 在指定屏幕上居中显示窗口
