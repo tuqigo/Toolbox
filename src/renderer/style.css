@@ -100,22 +100,13 @@ body {
 .capsule-icon {
     font-size: 14px;
     flex-shrink: 0;
-}
-
-.capsule-edit-button {
-    background: transparent;
-    border: none;
-    font-size: 12px;
-    color: #007AFF;
     cursor: pointer;
     padding: 2px 4px;
     border-radius: 4px;
-    margin-left: 4px;
     transition: background-color 0.2s;
-    flex-shrink: 0;
 }
 
-.capsule-edit-button:hover {
+.capsule-icon:hover {
     background: rgba(0, 122, 255, 0.1);
 }
 
@@ -376,17 +367,7 @@ body {
     color: var(--mt-fg, #333);
 }
 
-.save-button {
-    background: var(--mt-selected, rgba(0, 122, 255, 0.1));
-    border-color: var(--mt-selected, rgba(0, 122, 255, 0.3));
-    color: var(--mt-selected, #007AFF);
-}
-
-.save-button:hover {
-    background: var(--mt-selected, rgba(0, 122, 255, 0.2));
-    border-color: var(--mt-selected, rgba(0, 122, 255, 0.5));
-}
-
+.save-button:hover,
 .cancel-button:hover {
     background: var(--mt-hover, rgba(0, 0, 0, 0.05));
     border-color: var(--mt-border, rgba(0, 0, 0, 0.2));

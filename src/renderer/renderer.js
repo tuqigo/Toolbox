@@ -15,7 +15,6 @@ class MiniToolboxRenderer {
     this.capsuleContent = null;
     this.capsuleText = null;
     this.capsuleIcon = null;
-    this.capsuleEditButton = null;
     this.inputDisplay = null;
     
     this.currentContentAnalysis = null;
@@ -65,7 +64,6 @@ class MiniToolboxRenderer {
     this.capsuleContent = document.getElementById('capsuleContent');
     this.capsuleText = document.getElementById('capsuleText');
     this.capsuleIcon = document.getElementById('capsuleIcon');
-    this.capsuleEditButton = document.getElementById('capsuleEditButton');
     this.inputDisplay = document.getElementById('inputDisplay');
 
     if (!this.searchInput || !this.resultsList) {
@@ -263,9 +261,9 @@ class MiniToolboxRenderer {
     // 窗口拖拽功能
     this.setupWindowDragging();
 
-    // 胶囊编辑按钮事件监听器
-    if (this.capsuleEditButton) {
-      this.capsuleEditButton.addEventListener('click', (e) => {
+    // 胶囊图标编辑功能事件监听器
+    if (this.capsuleIcon) {
+      this.capsuleIcon.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
         
