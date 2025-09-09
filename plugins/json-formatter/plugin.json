@@ -2,7 +2,7 @@
   "name": "JSON 格式化",
   "description": "格式化与校验 JSON，支持复制",
   "logo": "🔧",
-  "window": { "width": 960, "height": 600, "resizable": true },
+  "window": { "width": 800, "height": 700, "resizable": true },
   "features": [
     {
       "code": "json.format",
