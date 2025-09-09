@@ -96,8 +96,8 @@ class MiniToolbox {
       try { this.tray.destroy(); } catch {}
       this.tray = null;
     }
-
-    const iconPath = path.join(__dirname, '../plugins/text-processor/deafult.png');
+    // 获取系统托盘icon路径
+    const iconPath = path.join(__dirname, '../build/icon.ico');
     let trayIcon;
     
     try {

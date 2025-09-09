@@ -8,7 +8,11 @@
     "start:quiet": "electron . --no-console",
     "dev": "electron . --dev",
     "build": "electron-builder",
-    "build:win": "electron-builder --win"
+    "build:win": "electron-builder --win",
+    "build:win:portable": "electron-builder --win portable",
+    "build:win:nsis": "electron-builder --win nsis",
+    "pack:win": "electron-packager . MiniToolbox --platform=win32 --arch=x64 --out=dist --overwrite --asar --prune=true --ignore=\"^/(cache|docs|tools)\" --ignore=\"^/README\\.md$\"",
+    "pack:win:optimized": "electron-packager . MiniToolbox --platform=win32 --arch=x64 --out=dist --overwrite --asar --prune=true --ignore=\"^/(cache|docs|tools|build)\" --ignore=\"^/README\\.md$\" --ignore=\"^/\\.git\" --ignore=\"^/\\.vscode\""
   },
   "keywords": [
     "electron",
@@ -20,31 +24,82 @@
   "license": "MIT",
   "devDependencies": {
     "electron": "^28.0.0",
-    "electron-builder": "^24.0.0"
+    "electron-builder": "^24.0.0",
+    "electron-packager": "^17.1.2",
+    "archiver": "^6.0.0",
+    "form-data": "^4.0.0"
   },
   "dependencies": {
     "fs-extra": "^11.0.0",
-    "archiver": "^6.0.0",
-    "yauzl": "^2.10.0",
-    "form-data": "^4.0.0"
+    "yauzl": "^2.10.0"
   },
   "build": {
     "appId": "com.minitoolbox.app",
     "productName": "MiniToolbox",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
+    "compression": "maximum",
+    "asar": true,
+    "asarUnpack": [
+      "plugins/**/*"
+    ],
     "files": [
       "src/**/*",
       "plugins/**/*",
-      "package.json"
+      "build/icon.ico",
+      "package.json",
+      "!**/cache/**/*",
+      "!**/docs/**/*",
+      "!**/tools/**/*",
+      "!**/*.md",
+      "!**/.git/**/*",
+      "!**/dist/**/*",
+      "!**/node_modules/**/*",
+      "node_modules/fs-extra/**/*",
+      "node_modules/yauzl/**/*",
+      "node_modules/universalify/**/*",
+      "node_modules/jsonfile/**/*",
+      "node_modules/graceful-fs/**/*",
+      "node_modules/bl/**/*",
+      "node_modules/buffer-crc32/**/*",
+      "node_modules/fd-slicer/**/*",
+      "node_modules/pend/**/*",
+      "node_modules/readable-stream/**/*",
+      "node_modules/core-util-is/**/*",
+      "node_modules/inherits/**/*",
+      "node_modules/isarray/**/*",
+      "node_modules/process-nextick-args/**/*",
+      "node_modules/safe-buffer/**/*",
+      "node_modules/string_decoder/**/*",
+      "node_modules/util-deprecate/**/*"
     ],
+    "extraResources": [],
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "requestedExecutionLevel": "asInvoker"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MiniToolbox"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
     }
   }
 }

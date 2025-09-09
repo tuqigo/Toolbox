@@ -339,6 +339,13 @@ document.getElementById('btnDev').onclick = () => MT.window.devtools.toggle();
 - `url-opener`：URL/域名直达（无 UI，进入即打开）
 - `clipboard-history`：剪贴板历史查看/搜索/复制/删除/清空（有 UI）
 
+
+## 打包命令
+
+- npm run build:win:portable # 便携版 (推荐)
+- npm run build:win:nsis # 安装程序版  
+- npm run build:win # 两个版本一起构建
+
 ## 许可证
 
 MIT License
