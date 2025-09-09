@@ -100,7 +100,7 @@ class Matcher {
                 if (text.toLowerCase().startsWith(r.value)) score += 30;
                 break;
               case 'keyword':
-                if (text.toLowerCase().includes(r.value)) score += 15;
+                if (text.toLowerCase() === r.value) score += 15;
                 break;
               case 'regex':
                 if (r.regex.test(text)) score += 25;

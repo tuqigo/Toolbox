@@ -113,7 +113,7 @@ class RuleCompiler {
       case 'regex':
         return rule.regex.test(t);
       case 'keyword':
-        return t.toLowerCase().includes(rule.value);
+        return t.toLowerCase() === rule.value;
       case 'prefix':
         return t.toLowerCase().startsWith(rule.value);
       case 'files': {
