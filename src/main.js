@@ -271,31 +271,78 @@ class MiniToolbox {
   }
 
   async showInputWindow() {
+    // 防重复调用保护
+    const timestamp = Date.now();
+    if (this._lastShowTime && (timestamp - this._lastShowTime) < 300) {
+      return;
+    }
+    this._lastShowTime = timestamp;
+    
     if (this.mainWindow) {
-      this.mainWindow.show();
-      this.mainWindow.center();
-      this.mainWindow.focus();
-      
-      // 确保主题正确应用（防止主窗口错过主题消息）
-      try {
-        const uiConfig = this.configStore.getUIConfig();
-        const { nativeTheme } = require('electron');
-        let effective = uiConfig.theme;
-        if (uiConfig.theme === 'system') {
-          effective = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
-        }
-        await this.applyThemeToWindows(uiConfig.theme, effective);
-      } catch (error) {
-        if (!this.isQuiet) {
-          console.warn('显示主窗口时应用主题失败:', error);
-        }
+      // 如果窗口已经显示，直接聚焦
+      if (this.mainWindow.isVisible()) {
+        this.mainWindow.focus();
+        return;
       }
+      
+      // 先设置窗口位置和透明度，避免闪烁
+      this.mainWindow.setOpacity(0);
+      this.mainWindow.center();
+      this.mainWindow.show();
+      
+      // 使用平滑的淡入动画
+      const fadeSteps = 10;
+      const fadeDelay = 15; // 总动画时间 150ms
+      
+      for (let i = 1; i <= fadeSteps; i++) {
+        setTimeout(() => {
+          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.setOpacity(i / fadeSteps);
+            if (i === fadeSteps) {
+              // 动画完成后聚焦
+              this.mainWindow.focus();
+            }
+          }
+        }, i * fadeDelay);
+      }
+      
+      // 确保主题正确应用（异步进行，不阻塞动画）
+      setTimeout(async () => {
+        try {
+          const uiConfig = this.configStore.getUIConfig();
+          const { nativeTheme } = require('electron');
+          let effective = uiConfig.theme;
+          if (uiConfig.theme === 'system') {
+            effective = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+          }
+          await this.applyThemeToWindows(uiConfig.theme, effective);
+        } catch (error) {
+          if (!this.isQuiet) {
+            console.warn('显示主窗口时应用主题失败:', error);
+          }
+        }
+      }, 50);
     }
   }
 
   hideMainWindow() {
-    if (this.mainWindow) {
-      this.mainWindow.hide();
+    if (this.mainWindow && this.mainWindow.isVisible()) {
+      // 使用平滑的淡出动画
+      const fadeSteps = 8;
+      const fadeDelay = 12; // 总动画时间 96ms，比淡入稍快
+      
+      for (let i = fadeSteps - 1; i >= 0; i--) {
+        setTimeout(() => {
+          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.setOpacity(i / fadeSteps);
+            if (i === 0) {
+              // 动画完成后隐藏窗口并恢复透明度
+              this.mainWindow.hide();
+              this.mainWindow.setOpacity(1);
+            }
+          }
+        }, (fadeSteps - i) * fadeDelay);
+      }
     }
   }
 
@@ -865,9 +912,6 @@ class MiniToolbox {
 
     // 执行插件
     ipcMain.on('execute-plugin', (event, pluginId, inputData) => {
-      if (!this.isQuiet) {
-        console.log('收到插件执行请求:', pluginId, inputData);
-      }
       this.executePlugin(pluginId, inputData).catch(error => {
         console.error('插件执行出错:', error);
       });
