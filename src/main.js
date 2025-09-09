@@ -232,12 +232,12 @@ class MiniToolbox {
   // 主窗口
   createMainWindow() {
     this.mainWindow = new BrowserWindow({
-      width: 600,
-      height: 400,
-      minWidth: 600,
-      maxWidth: 600,
-      minHeight: 400,
-      maxHeight: 400,
+      width: 700,
+      height: 450,
+      minWidth: 700,
+      maxWidth: 700,
+      minHeight: 450,
+      maxHeight: 450,
       show: false,
       frame: false,
       transparent: true,

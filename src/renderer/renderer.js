@@ -5,13 +5,18 @@ class MiniToolboxRenderer {
   constructor() {
     this.searchInput = null;
     this.resultsList = null;
-    this.multilinePreview = null;
-    this.previewText = null;
-    this.editButton = null;
     this.editArea = null;
     this.editTextarea = null;
     this.saveButton = null;
     this.cancelButton = null;
+    
+    // 胶囊相关元素
+    this.contentCapsule = null;
+    this.capsuleContent = null;
+    this.capsuleText = null;
+    this.capsuleIcon = null;
+    this.capsuleEditButton = null;
+    this.inputDisplay = null;
     
     this.currentContentAnalysis = null;
     this.selectedIndex = -1;
@@ -24,10 +29,14 @@ class MiniToolboxRenderer {
     this.inputClearTimeout = null; // 清除输入的超时定时器
     this.autoFillEnabled = true; // 是否启用自动填充
     
-    // 多行文本管理
-    this.actualContent = ''; // 实际的完整内容（包括换行）
-    this.isMultilineMode = false; // 是否处于多行模式
+    // 内容管理
+    this.actualContent = ''; // 实际的完整内容
     this.isEditingMode = false; // 是否处于编辑模式（本地状态）
+    
+    // 胶囊状态管理
+    this.capsuleMode = false; // 是否处于胶囊模式
+    this.capsuleData = null; // 胶囊数据
+    this.filterText = ''; // 筛选文本
     
     // 拖拽状态管理
     this._isDragging = false;
@@ -46,14 +55,18 @@ class MiniToolboxRenderer {
   initElements() {
     this.searchInput = document.getElementById('searchInput');
     this.resultsList = document.getElementById('resultsList');
-    this.multilinePreview = document.getElementById('multilinePreview');
-    this.previewText = document.getElementById('previewText');
-    this.editButton = document.getElementById('editButton');
     this.editArea = document.getElementById('editArea');
     this.editTextarea = document.getElementById('editTextarea');
     this.saveButton = document.getElementById('saveButton');
     this.cancelButton = document.getElementById('cancelButton');
     
+    // 胶囊相关元素
+    this.contentCapsule = document.getElementById('contentCapsule');
+    this.capsuleContent = document.getElementById('capsuleContent');
+    this.capsuleText = document.getElementById('capsuleText');
+    this.capsuleIcon = document.getElementById('capsuleIcon');
+    this.capsuleEditButton = document.getElementById('capsuleEditButton');
+    this.inputDisplay = document.getElementById('inputDisplay');
 
     if (!this.searchInput || !this.resultsList) {
       console.error('关键元素未找到！');
@@ -76,8 +89,16 @@ class MiniToolboxRenderer {
     this.searchInput.addEventListener('input', () => {
       this.lastInputTime = Date.now(); // 记录输入时间
       this.autoFillEnabled = false; // 用户手动输入时禁用自动填充
-      this.actualContent = this.searchInput.value; // 同步实际内容
-      this.performSearch();
+      
+      if (this.capsuleMode) {
+        // 胶囊模式下，输入的是筛选文本
+        this.filterText = this.searchInput.value;
+        this.performSearchWithCapsule();
+      } else {
+        // 普通模式
+        this.actualContent = this.searchInput.value;
+        this.performSearch();
+      }
     });
 
     // 键盘事件
@@ -130,10 +151,10 @@ class MiniToolboxRenderer {
         const target = e.target;
         const inInput = this.searchInput && (target === this.searchInput || this.searchInput.contains(target));
         const inResults = this.resultsList && (target === this.resultsList || this.resultsList.contains(target));
-        const inMultilinePreview = this.multilinePreview && (target === this.multilinePreview || this.multilinePreview.contains(target));
         const inEditArea = this.editArea && (target === this.editArea || this.editArea.contains(target));
+        const inCapsule = this.contentCapsule && (target === this.contentCapsule || this.contentCapsule.contains(target));
         
-        if (!inInput && !inResults && !inMultilinePreview && !inEditArea) {
+        if (!inInput && !inResults && !inEditArea && !inCapsule) {
           // 记录隐藏时间，用于判断是否需要清除输入
           this.lastInputTime = Date.now();
           ipcRenderer.send('hide-main-window');
@@ -242,37 +263,22 @@ class MiniToolboxRenderer {
     // 窗口拖拽功能
     this.setupWindowDragging();
 
-    // 多行文本相关事件监听器
-    if (this.editButton) {
-      this.editButton.addEventListener('click', (e) => {
+    // 胶囊编辑按钮事件监听器
+    if (this.capsuleEditButton) {
+      this.capsuleEditButton.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        
+        // 胶囊模式下，编辑胶囊内容
+        if (this.capsuleMode && this.capsuleData) {
+          this.actualContent = this.capsuleData.content;
+          this.hideCapsule();
+        }
         this.showEditArea();
       });
     }
 
-    if (this.multilinePreview) {
-      this.multilinePreview.addEventListener('click', (e) => {
-        // 检查点击的是否是编辑按钮或其子元素
-        if (!e.target.closest('.edit-button')) {
-          this.showEditArea();
-        }
-      });
-
-      // 添加键盘事件支持
-      this.multilinePreview.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          this.showEditArea();
-        } else if (e.key === 'Escape') {
-          e.preventDefault();
-          this.clearContent();
-        } else {
-          // 传递其他键盘事件给handleKeydown
-          this.handleKeydown(e);
-        }
-      });
-    }
+    // 多行文本相关事件监听器已删除
 
     if (this.saveButton) {
       this.saveButton.addEventListener('click', () => {
@@ -313,12 +319,8 @@ class MiniToolboxRenderer {
       this.autoFillEnabled = true; // 重置自动填充状态
     }
     
-    // 根据当前模式聚焦到相应元素
-    if (this.isMultilineMode && this.multilinePreview) {
-      // 多行模式下，让预览区域可以接收焦点
-      this.multilinePreview.setAttribute('tabindex', '0');
-      this.multilinePreview.focus();
-    } else if (this.searchInput) {
+    // 聚焦到输入框
+    if (this.searchInput) {
       this.searchInput.focus();
       this.searchInput.select();
     }
@@ -338,7 +340,7 @@ class MiniToolboxRenderer {
       const recentClipboard = await ipcRenderer.invoke('get-recent-clipboard');
       
       if (recentClipboard && recentClipboard.trim()) {
-        this.setContent(recentClipboard);
+        this.setContent(recentClipboard, false); // 剪贴板内容不是手动输入
         this.autoFillEnabled = false; // 禁用自动填充，避免重复填充
         
         console.log(`自动填充剪贴板内容 (最大时间: ${config.autoFillMaxAge}秒):`, recentClipboard.substring(0, 50));
@@ -357,7 +359,7 @@ class MiniToolboxRenderer {
         const clipboardContent = await ipcRenderer.invoke('get-clipboard');
         
         if (clipboardContent && clipboardContent.trim()) {
-          this.setContent(clipboardContent);
+          this.setContent(clipboardContent, false); // 剪贴板内容不是手动输入
           this.autoFillEnabled = false; // 禁用自动填充
           console.log('使用降级方法自动填充剪贴板内容（API调用失败）');
         }
@@ -379,7 +381,7 @@ class MiniToolboxRenderer {
     }
     
     if (content && content.trim() && document.hasFocus()) {
-      this.setContent(content);
+      this.setContent(content, false); // 剪贴板变化不是手动输入
     }
   }
 
@@ -413,7 +415,7 @@ class MiniToolboxRenderer {
     // 处理文本
     const pastedText = clipboardData.getData('text/plain');
     if (pastedText) {
-      this.setContent(pastedText);
+      this.setContent(pastedText, false); // 粘贴内容不是手动输入
     }
   }
 
@@ -428,7 +430,7 @@ class MiniToolboxRenderer {
     } else {
       const droppedText = e.dataTransfer.getData('text/plain');
       if (droppedText) {
-        this.setContent(droppedText);
+        this.setContent(droppedText, false); // 拖拽内容不是手动输入
       }
     }
   }
@@ -463,6 +465,14 @@ class MiniToolboxRenderer {
         if (this.selectedIndex >= 0 && results.length > 0) {
           const selectedResult = results[this.selectedIndex];
           this.executeSelectedPlugin(selectedResult);
+        }
+        break;
+        
+      case 'Backspace':
+        // 在胶囊模式下，如果输入框为空，删除胶囊
+        if (this.capsuleMode && this.searchInput.value === '' && this.searchInput.selectionStart === 0) {
+          e.preventDefault();
+          this.deleteCapsule();
         }
         break;
     }
@@ -1056,38 +1066,38 @@ class MiniToolboxRenderer {
   }
 
   // 多行文本处理核心方法
-  setContent(content) {
+  setContent(content, isManualInput = false) {
     if (!content) {
       this.clearContent();
       return;
     }
 
     this.actualContent = content;
-    const lines = content.split('\n');
-    const isMultiline = lines.length > 1 || content.includes('\n');
-
-    if (isMultiline) {
-      this.isMultilineMode = true;
-      this.showMultilinePreview(content);
-    } else {
-      this.isMultilineMode = false;
-      this.showSingleLineInput(content);
+    
+    // 判断是否应该显示胶囊
+    if (this.shouldShowCapsule(content, isManualInput)) {
+      const capsuleData = this.createTextCapsule(content);
+      this.showCapsule(capsuleData);
+      // 使用胶囊内容进行搜索
+      this.performSearchWithCapsule();
+      return;
     }
+
+    // 直接在输入框显示内容
+    this.showSingleLineInput(content);
 
     this.performSearch();
   }
 
   clearContent() {
     this.actualContent = '';
-    this.isMultilineMode = false;
+    
+    // 清除胶囊状态
+    this.hideCapsule();
     
     if (this.searchInput) {
       this.searchInput.value = '';
       this.searchInput.style.display = 'block';
-    }
-    
-    if (this.multilinePreview) {
-      this.multilinePreview.style.display = 'none';
     }
     
     if (this.editArea) {
@@ -1111,45 +1121,11 @@ class MiniToolboxRenderer {
       this.searchInput.style.display = 'block';
     }
     
-    if (this.multilinePreview) {
-      this.multilinePreview.style.display = 'none';
-    }
-    
     if (this.editArea) {
       this.editArea.style.display = 'none';
     }
   }
 
-  showMultilinePreview(content) {
-    const allLines = content.split('\n');
-    const nonEmptyLines = allLines.filter(line => line.trim());
-    
-    if (nonEmptyLines.length === 0) {
-      this.clearContent();
-      return;
-    }
-
-    const firstLine = nonEmptyLines[0].trim();
-    const lastLine = nonEmptyLines[nonEmptyLines.length - 1].trim();
-    const previewText = nonEmptyLines.length === 1 && allLines.length === 1 ? 
-      firstLine : `${firstLine} —— ${lastLine}`;
-
-    if (this.searchInput) {
-      this.searchInput.style.display = 'none';
-    }
-    
-    if (this.previewText) {
-      this.previewText.textContent = previewText;
-    }
-    
-    if (this.multilinePreview) {
-      this.multilinePreview.style.display = 'flex';
-    }
-    
-    if (this.editArea) {
-      this.editArea.style.display = 'none';
-    }
-  }
 
   showEditArea() {
     if (this.editTextarea) {
@@ -1164,6 +1140,9 @@ class MiniToolboxRenderer {
     if (this.editArea) {
       this.editArea.style.display = 'block';
     }
+    
+    // 不隐藏输入显示区域，让用户能看到上下文
+    // 但确保胶囊已被隐藏（在调用此方法前已经调用了hideCapsule）
     
     // 隐藏插件列表
     const resultsContainer = document.getElementById('resultsContainer');
@@ -1185,6 +1164,8 @@ class MiniToolboxRenderer {
       this.editArea.style.display = 'none';
     }
     
+    // 输入显示区域一直保持显示，不需要重新显示
+    
     // 重新显示插件列表
     const resultsContainer = document.getElementById('resultsContainer');
     if (resultsContainer && this.actualContent.trim()) {
@@ -1199,11 +1180,8 @@ class MiniToolboxRenderer {
       ipcRenderer.send('set-editing-mode', false);
     } catch {}
     
-    // 重新聚焦到搜索输入框或多行预览
-    if (this.isMultilineMode && this.multilinePreview) {
-      this.multilinePreview.setAttribute('tabindex', '0');
-      this.multilinePreview.focus();
-    } else if (this.searchInput) {
+    // 重新聚焦到搜索输入框
+    if (this.searchInput) {
       this.searchInput.focus();
     }
   }
@@ -1211,14 +1189,154 @@ class MiniToolboxRenderer {
   saveMultilineContent() {
     if (this.editTextarea) {
       const newContent = this.editTextarea.value;
-      this.setContent(newContent);
+      // 用户编辑过的内容，需要判断是否应该胶囊化
+      this.setContent(newContent, false);
     }
     this.hideEditArea();
   }
 
   // 获取当前的实际内容（用于插件）
   getCurrentContent() {
+    // 胶囊模式下返回胶囊内容，否则返回实际内容
+    if (this.capsuleMode && this.capsuleData) {
+      return this.capsuleData.content;
+    }
     return this.actualContent;
+  }
+
+  // 胶囊功能相关方法
+  
+  // 判断是否应该显示胶囊
+  shouldShowCapsule(content, isManualInput) {
+    if (!content || typeof content !== 'string') return false;
+    // 用户手动输入不显示胶囊
+    if (isManualInput) return false;
+    // 长度大于50显示胶囊
+    return content.trim().length > 50;
+  }
+
+  // 创建文本胶囊
+  createTextCapsule(content) {
+    const trimmed = content.trim();
+    const maxLength = 20; // 总显示长度
+    const prefixLength = 12; // 前缀长度
+    const suffixLength = 8; // 后缀长度
+    
+    let displayText;
+    if (trimmed.length <= maxLength) {
+      displayText = trimmed;
+    } else {
+      const prefix = trimmed.substring(0, prefixLength);
+      const suffix = trimmed.substring(trimmed.length - suffixLength);
+      displayText = `${prefix}...${suffix}`;
+    }
+
+    return {
+      type: 'text',
+      content: trimmed,
+      displayText: displayText,
+      icon: '📝'
+    };
+  }
+
+  // 显示胶囊
+  showCapsule(capsuleData) {
+    if (!this.contentCapsule || !capsuleData) return;
+
+    this.capsuleData = capsuleData;
+    this.capsuleMode = true;
+
+    // 更新胶囊内容
+    if (this.capsuleText) {
+      this.capsuleText.textContent = capsuleData.displayText;
+      this.capsuleText.title = capsuleData.content; // 鼠标悬停显示完整内容
+    }
+    if (this.capsuleIcon) {
+      this.capsuleIcon.textContent = capsuleData.icon;
+    }
+
+    // 显示胶囊
+    this.contentCapsule.classList.remove('hidden');
+    this.contentCapsule.style.display = 'flex';
+
+    // 设置输入框为胶囊模式
+    if (this.inputDisplay) {
+      this.inputDisplay.classList.add('capsule-mode');
+    }
+
+    // 清空输入框，准备接收筛选文本
+    this.searchInput.value = '';
+    this.filterText = '';
+
+    // 聚焦输入框
+    this.searchInput.focus();
+  }
+
+  // 隐藏胶囊
+  hideCapsule() {
+    if (!this.contentCapsule) return;
+
+    this.capsuleData = null;
+    this.capsuleMode = false;
+    this.filterText = '';
+
+    // 隐藏胶囊
+    this.contentCapsule.classList.add('hidden');
+    this.contentCapsule.style.display = 'none';
+
+    // 移除输入框胶囊模式
+    if (this.inputDisplay) {
+      this.inputDisplay.classList.remove('capsule-mode');
+    }
+  }
+
+  // 删除胶囊（Backspace时调用）
+  deleteCapsule() {
+    this.hideCapsule();
+    // 清空输入框和内容
+    if (this.searchInput) {
+      this.searchInput.value = '';
+      this.actualContent = '';
+      this.filterText = '';
+      // 清空后隐藏插件列表
+      this.displayResults([]);
+    }
+  }
+
+
+  // 胶囊模式下的搜索
+  performSearchWithCapsule() {
+    if (!this.capsuleData) return;
+
+    // 使用胶囊内容进行内容分析
+    this.analyzeAndSearch(this.capsuleData.content, this.filterText);
+  }
+
+  // 统一的分析和搜索方法
+  async analyzeAndSearch(content, filterText = '') {
+    try {
+      // 分析胶囊内容
+      const analysis = await ipcRenderer.invoke('analyze-content', content);
+      this.currentContentAnalysis = analysis;
+
+      // 匹配插件
+      const plugins = await ipcRenderer.invoke('match-plugins', analysis);
+
+      // 如果有筛选文本，进一步过滤插件
+      let filteredPlugins = plugins;
+      if (filterText && filterText.trim()) {
+        const filterLower = filterText.toLowerCase().trim();
+        filteredPlugins = plugins.filter(plugin => 
+          plugin.name.toLowerCase().includes(filterLower) ||
+          plugin.description.toLowerCase().includes(filterLower) ||
+          (plugin.featureExplain && plugin.featureExplain.toLowerCase().includes(filterLower))
+        );
+      }
+
+      this.displayResults(filteredPlugins);
+    } catch (error) {
+      console.error('搜索失败:', error);
+    }
   }
 
   // 设置窗口拖拽功能

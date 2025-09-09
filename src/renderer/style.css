@@ -12,19 +12,19 @@ body {
 
 .container {
     width: 100%;
-    height: 400px; /* 固定高度 */
+    height: 450px; /* 更新高度 */
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: flex-start;
     padding: 10px;
-    overflow: visible; /* 允许外阴影溢出以避免“黑色大框”视觉 */
+    overflow: visible; /* 允许外阴影溢出以避免"黑色大框"视觉 */
     background: transparent; /* 避免暗黑时整块背景色 */
 }
 
 .search-box {
     width: 100%;
-    max-width: 580px;
+    max-width: 680px; /* 增加宽度适应700px窗口 */
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(20px);
     border-radius: 12px;
@@ -50,17 +50,90 @@ body {
     display: flex;
     align-items: center;
     min-height: 52px; /* 确保有足够高度显示预览 */
+    gap: 8px; /* 胶囊和输入框之间的间距 */
+    padding: 8px 20px;
+}
+
+/* 胶囊样式 */
+.content-capsule {
+    max-width: 30%; /* 最大宽度30% */
+    height: 80%; /* 输入区域高度的80% */
+    background: rgba(0, 122, 255, 0.1);
+    border: 1px dashed rgba(0, 122, 255, 0.3);
+    border-radius: 8px;
+    padding: 4px 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0; /* 不允许压缩 */
+}
+
+.content-capsule.hidden {
+    display: none;
+}
+
+.content-capsule:hover {
+    background: rgba(0, 122, 255, 0.15);
+    border-color: rgba(0, 122, 255, 0.5);
+}
+
+.capsule-content {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+.capsule-text {
+    font-size: 12px;
+    color: #007AFF;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+}
+
+.capsule-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.capsule-edit-button {
+    background: transparent;
+    border: none;
+    font-size: 12px;
+    color: #007AFF;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    margin-left: 4px;
+    transition: background-color 0.2s;
+    flex-shrink: 0;
+}
+
+.capsule-edit-button:hover {
+    background: rgba(0, 122, 255, 0.1);
 }
 
 #searchInput {
-    width: 100%;
-    padding: 16px 20px;
+    flex: 1; /* 占用剩余空间 */
+    padding: 8px 12px;
     padding-right: 80px;
     font-size: 16px;
     border: none;
     outline: none;
     background: transparent;
     color: #333;
+    min-width: 0; /* 允许压缩 */
+}
+
+/* 胶囊模式下的输入框样式调整 */
+.input-display.capsule-mode #searchInput {
+    padding-left: 0; /* 胶囊模式下左边距为0 */
 }
 
 #searchInput::placeholder {
@@ -89,7 +162,7 @@ body {
 
 .results-container {
     width: 100%;
-    max-width: 580px;
+    max-width: 680px; /* 匹配新的输入框宽度 */
     margin-top: 8px;
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(20px);
@@ -236,66 +309,6 @@ body {
     opacity: 0.5;
 }
 
-/* 多行文本预览样式 */
-.multiline-preview {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: var(--mt-panel, rgba(255, 255, 255, 0.8));
-    border: 2px dashed var(--mt-border, rgba(0, 122, 255, 0.3));
-    border-radius: 8px;
-    padding: 14px 18px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 14px;
-    color: var(--mt-fg, #333);
-    cursor: pointer;
-    transition: all 0.2s ease;
-    outline: none;
-    z-index: 10;
-    min-height: 50px;
-}
-
-.multiline-preview:hover,
-.multiline-preview:focus {
-    border-color: var(--mt-border, rgba(0, 122, 255, 0.5));
-    background: var(--mt-hover, rgba(0, 122, 255, 0.05));
-}
-
-.preview-text {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    margin-right: 8px;
-    font-style: italic;
-    color: var(--mt-text-muted, #666);
-}
-
-.edit-button {
-    background: var(--mt-selected, rgba(0, 122, 255, 0.1));
-    border: 1px solid var(--mt-border, rgba(0, 122, 255, 0.3));
-    border-radius: 4px;
-    padding: 4px 6px;
-    font-size: 12px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    color: var(--mt-fg, #333);
-    flex-shrink: 0;
-    outline: none;
-}
-
-.edit-button:hover {
-    background: var(--mt-selected, rgba(0, 122, 255, 0.2));
-    border-color: var(--mt-border, rgba(0, 122, 255, 0.5));
-}
-
-.edit-button:active {
-    background: var(--mt-selected, rgba(0, 122, 255, 0.3));
-}
 
 /* 编辑区域样式 */
 .edit-area {
