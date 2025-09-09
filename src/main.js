@@ -117,7 +117,7 @@ class MiniToolbox {
     const clipboardConfig = this.configStore.getClipboardConfig();
     
     const contextMenu = Menu.buildFromTemplate([
-      { label: '显示输入框', click: () => this.showInputWindow() },
+      { label: '切换输入框', click: () => this.toggleInputWindow() },
       { label: '重新加载插件', click: () => this.reloadPlugins() },
       { 
         label: '标题栏高度', 
@@ -181,7 +181,7 @@ class MiniToolbox {
     this.tray.setContextMenu(contextMenu);
     
     this.tray.on('click', () => {
-      this.showInputWindow();
+      this.toggleInputWindow();
     });
   }
   async setTitlebarHeight(px) {
@@ -244,6 +244,7 @@ class MiniToolbox {
       alwaysOnTop: true,
       skipTaskbar: true,
       resizable: false,
+      movable: true, // 启用窗口移动
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false,
@@ -253,12 +254,15 @@ class MiniToolbox {
 
     this.mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'));
 
+    // 设置拖拽区域
+    this.setupWindowDragging();
+
     this.mainWindow.on('blur', () => {
-      if (!this.isDev && !this.isEditingMode) {
+      if (!this.isDev && !this.isEditingMode && !this._isDragging) {
         // 添加短暂延迟，避免快速焦点切换时误触发
         setTimeout(() => {
-          // 再次检查窗口状态，如果窗口仍然失去焦点且不在编辑模式，则隐藏
-          if (this.mainWindow && !this.mainWindow.isFocused() && !this.isEditingMode) {
+          // 再次检查窗口状态，如果窗口仍然失去焦点且不在编辑模式且不在拖拽中，则隐藏
+          if (this.mainWindow && !this.mainWindow.isFocused() && !this.isEditingMode && !this._isDragging) {
             this.hideMainWindow();
           }
         }, 100);
@@ -270,24 +274,87 @@ class MiniToolbox {
     }
   }
 
-  async showInputWindow() {
+  // 设置窗口拖拽功能
+  setupWindowDragging() {
+    let isDragging = false;
+    let dragStartPosition = { x: 0, y: 0 };
+    let windowStartPosition = { x: 0, y: 0 };
+
+    // 监听渲染进程的拖拽事件
+    ipcMain.on('window-drag-start', (event, { x, y }) => {
+      if (!this.mainWindow) return;
+      
+      isDragging = true;
+      this._isDragging = true;
+      dragStartPosition = { x, y };
+      const windowBounds = this.mainWindow.getBounds();
+      windowStartPosition = { x: windowBounds.x, y: windowBounds.y };
+    });
+
+    ipcMain.on('window-drag-move', (event, { x, y }) => {
+      if (!this.mainWindow || !isDragging) return;
+      
+      const deltaX = x - dragStartPosition.x;
+      const deltaY = y - dragStartPosition.y;
+      
+      const newX = windowStartPosition.x + deltaX;
+      const newY = windowStartPosition.y + deltaY;
+      
+      this.mainWindow.setPosition(newX, newY);
+    });
+
+    ipcMain.on('window-drag-end', () => {
+      isDragging = false;
+      // 延迟重置拖拽状态，避免立即触发blur事件隐藏窗口
+      setTimeout(() => {
+        this._isDragging = false;
+      }, 100);
+    });
+  }
+
+  async toggleInputWindow() {
     // 防重复调用保护
     const timestamp = Date.now();
-    if (this._lastShowTime && (timestamp - this._lastShowTime) < 300) {
+    if (this._lastToggleTime && (timestamp - this._lastToggleTime) < 300) {
       return;
     }
-    this._lastShowTime = timestamp;
+    this._lastToggleTime = timestamp;
     
     if (this.mainWindow) {
-      // 如果窗口已经显示，直接聚焦
-      if (this.mainWindow.isVisible()) {
-        this.mainWindow.focus();
+      const currentScreen = this.getCurrentScreen();
+      const isOnCurrentScreen = this.isWindowOnScreen(currentScreen);
+      
+      // 如果窗口在当前屏幕显示，则隐藏
+      if (this.mainWindow.isVisible() && isOnCurrentScreen) {
+        this.hideMainWindow();
         return;
       }
       
+      // 如果窗口在其他屏幕显示，先隐藏再在当前屏幕显示
+      if (this.mainWindow.isVisible() && !isOnCurrentScreen) {
+        this.hideMainWindow();
+        // 等待隐藏动画完成后再显示
+        setTimeout(async () => {
+          await this.showInputWindow();
+        }, 100);
+        return;
+      }
+      
+      // 窗口未显示，直接在当前屏幕显示
+      await this.showInputWindow();
+    }
+  }
+
+  async showInputWindow() {
+    if (this.mainWindow) {
+      // 获取当前鼠标所在的屏幕
+      const currentScreen = this.getCurrentScreen();
+      
       // 先设置窗口位置和透明度，避免闪烁
       this.mainWindow.setOpacity(0);
-      this.mainWindow.center();
+      
+      // 在当前屏幕居中显示
+      this.centerWindowOnScreen(currentScreen);
       this.mainWindow.show();
       
       // 使用平滑的淡入动画
@@ -344,6 +411,47 @@ class MiniToolbox {
         }, (fadeSteps - i) * fadeDelay);
       }
     }
+  }
+
+  // 获取当前鼠标所在的屏幕
+  getCurrentScreen() {
+    const { screen } = require('electron');
+    const cursorPoint = screen.getCursorScreenPoint();
+    return screen.getDisplayNearestPoint(cursorPoint);
+  }
+
+  // 在指定屏幕上居中显示窗口
+  centerWindowOnScreen(display) {
+    if (!this.mainWindow || !display) return;
+    
+    const windowBounds = this.mainWindow.getBounds();
+    const { bounds } = display;
+    
+    const x = Math.round(bounds.x + (bounds.width - windowBounds.width) / 2);
+    const y = Math.round(bounds.y + (bounds.height - windowBounds.height) / 2);
+    
+    this.mainWindow.setPosition(x, y);
+  }
+
+  // 检测窗口是否在指定屏幕上
+  isWindowOnScreen(display) {
+    if (!this.mainWindow || !display || !this.mainWindow.isVisible()) {
+      return false;
+    }
+    
+    const windowBounds = this.mainWindow.getBounds();
+    const { bounds } = display;
+    
+    // 检查窗口中心点是否在屏幕范围内
+    const windowCenterX = windowBounds.x + windowBounds.width / 2;
+    const windowCenterY = windowBounds.y + windowBounds.height / 2;
+    
+    return (
+      windowCenterX >= bounds.x &&
+      windowCenterX <= bounds.x + bounds.width &&
+      windowCenterY >= bounds.y &&
+      windowCenterY <= bounds.y + bounds.height
+    );
   }
 
   // 插件管理
@@ -591,7 +699,26 @@ class MiniToolbox {
     }
   }
 
-  async createPluginWindow(plugin) { return this.windowManager.createForPlugin(plugin); }
+  async createPluginWindow(plugin) { 
+    // 获取主输入框所在的屏幕
+    const mainWindowScreen = this.getMainWindowScreen();
+    return this.windowManager.createForPlugin(plugin, mainWindowScreen); 
+  }
+
+  // 获取主输入框所在的屏幕
+  getMainWindowScreen() {
+    if (!this.mainWindow || !this.mainWindow.isVisible()) {
+      // 如果主窗口不可见，使用当前鼠标所在屏幕
+      return this.getCurrentScreen();
+    }
+    
+    const { screen } = require('electron');
+    const windowBounds = this.mainWindow.getBounds();
+    const windowCenterX = windowBounds.x + windowBounds.width / 2;
+    const windowCenterY = windowBounds.y + windowBounds.height / 2;
+    
+    return screen.getDisplayNearestPoint({ x: windowCenterX, y: windowCenterY });
+  }
 
   // 在主进程发起 HTTP/HTTPS 请求，避免渲染进程的跨域与权限限制
   async performRequest(reqOptions) {
@@ -1056,7 +1183,7 @@ class MiniToolbox {
       const mainWindowShortcut = shortcutConfig.mainWindow || 'Ctrl+Space';
       
       const ret = globalShortcut.register(mainWindowShortcut, () => {
-        this.showInputWindow();
+        this.toggleInputWindow();
       });
 
       if (!ret) {
@@ -1064,7 +1191,7 @@ class MiniToolbox {
         // 如果自定义快捷键失败，尝试默认的
         if (mainWindowShortcut !== 'Ctrl+Space') {
           const fallback = globalShortcut.register('Ctrl+Space', () => {
-            this.showInputWindow();
+            this.toggleInputWindow();
           });
           if (fallback) {
             console.log('使用默认快捷键 Ctrl+Space');
@@ -1219,7 +1346,7 @@ class MiniToolbox {
     }
 
     app.on('second-instance', () => {
-      this.showInputWindow();
+      this.toggleInputWindow();
     });
 
     app.on('window-all-closed', (event) => {
@@ -1297,3 +1424,4 @@ class MiniToolbox {
 // 启动应用
 const miniToolbox = new MiniToolbox();
 miniToolbox.init().catch(console.error);
+

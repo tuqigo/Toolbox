@@ -14,10 +14,14 @@ class WindowManager {
     this.defaultTheme = (options.defaultTheme || 'system'); // 'system' | 'light' | 'dark'
   }
 
-  async createForPlugin(pluginMeta) {
+  async createForPlugin(pluginMeta, targetScreen = null) {
     if (this.windows.has(pluginMeta.id)) {
       const win = this.windows.get(pluginMeta.id);
       if (!win.isDestroyed()) {
+        // 如果指定了目标屏幕，将窗口移动到该屏幕
+        if (targetScreen) {
+          this.centerWindowOnScreen(win, targetScreen);
+        }
         win.show();
         win.focus();
         return win;
@@ -26,7 +30,7 @@ class WindowManager {
     }
 
     const cfg = pluginMeta.window || {};
-    const win = new BrowserWindow({
+    const windowOptions = {
       width: cfg.width || 900,
       height: cfg.height || 640,
       show: false,
@@ -45,7 +49,18 @@ class WindowManager {
           `--mt-titlebar-mode=overlay`
         ]
       }
-    });
+    };
+
+    // 如果指定了目标屏幕，在该屏幕上创建窗口
+    if (targetScreen) {
+      const { bounds } = targetScreen;
+      const x = Math.round(bounds.x + (bounds.width - windowOptions.width) / 2);
+      const y = Math.round(bounds.y + (bounds.height - windowOptions.height) / 2);
+      windowOptions.x = x;
+      windowOptions.y = y;
+    }
+
+    const win = new BrowserWindow(windowOptions);
 
     // 先登记映射（主窗口可选）
     try { this.webContentsToPluginId.set(win.webContents.id, pluginMeta.id); } catch {}
@@ -204,6 +219,19 @@ class WindowManager {
         try { v.webContents.send('ui-theme', payload); } catch {}
       }
     } catch {}
+  }
+
+  // 在指定屏幕上居中显示窗口
+  centerWindowOnScreen(window, display) {
+    if (!window || !display || window.isDestroyed()) return;
+    
+    const windowBounds = window.getBounds();
+    const { bounds } = display;
+    
+    const x = Math.round(bounds.x + (bounds.width - windowBounds.width) / 2);
+    const y = Math.round(bounds.y + (bounds.height - windowBounds.height) / 2);
+    
+    window.setPosition(x, y);
   }
 }
 
