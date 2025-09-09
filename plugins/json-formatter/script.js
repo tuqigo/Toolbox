@@ -6,7 +6,6 @@
   const btnCollapseAll = $('btnCollapseAll');
   const btnExpandAll = $('btnExpandAll');
   const btnCopyMinify = $('btnCopyMinify');
-  const btnCopyEscape = $('btnCopyEscape');
   const errorBox = $('error');
   const queryInput = $('query');
   const tooltip = $('tooltip');
@@ -681,10 +680,9 @@
   btnCollapseAll.addEventListener('click', collapseAll);
   btnExpandAll.addEventListener('click', expandAll);
   btnCopyMinify.addEventListener('click', copyMinified);
-  btnCopyEscape.addEventListener('click', copyEscaped);
 
   // 为按钮添加 tooltip
-  [btnFormat, btnCollapseAll, btnExpandAll, btnCopyMinify, btnCopyEscape].forEach(btn => {
+  [btnFormat, btnCollapseAll, btnExpandAll, btnCopyMinify].forEach(btn => {
     btn.addEventListener('mouseenter', (e) => {
       showTooltip(e, btn.getAttribute('title'));
     });
