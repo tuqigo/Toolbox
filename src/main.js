@@ -24,6 +24,7 @@ const { Matcher } = require('./core/matcher');
 const { UsageStore } = require('./core/usageStore');
 const { ConfigStore } = require('./core/configStore');
 const { PluginInstaller } = require('./core/pluginInstaller');
+const { IconManager } = require('./core/iconManager');
 
 class MiniToolbox {
   constructor() {
@@ -43,6 +44,7 @@ class MiniToolbox {
     this.usageStore = new UsageStore({ isQuiet: this.isQuiet });
     this.matcher = new Matcher({ isQuiet: this.isQuiet, usageStore: this.usageStore });
     this.pluginInstaller = new PluginInstaller({ isQuiet: this.isQuiet });
+    this.iconManager = new IconManager();
     this.devLoggingInitialized = false;
     
     // 剪贴板忽略相关
@@ -60,7 +62,17 @@ class MiniToolbox {
   }
 
   // 基础内容分析器 - 只做最基本的分类
-  analyzeContent(content) { return this.inputAnalyzer.analyze(content); }
+  analyzeContent(content) { 
+    const analysis = this.inputAnalyzer.analyze(content);
+    
+    // 对于非文本文件，标记为不参与内容分析
+    if (analysis.type === 'file' || analysis.type === 'image' || analysis.type === 'video' || analysis.type === 'audio') {
+      const isNonTextFile = this.inputAnalyzer.isNonTextFile(content);
+      analysis.skipContentAnalysis = isNonTextFile;
+    }
+    
+    return analysis;
+  }
 
   // 智能插件匹配器
   // 使用预建索引与偏好分排序：
@@ -1141,6 +1153,16 @@ class MiniToolbox {
       return this.matchPlugins(contentAnalysis);
     });
 
+    // 获取文件图标
+    ipcMain.handle('get-file-icon', async (event, filePath) => {
+      try {
+        return await this.iconManager.getFileIcon(filePath);
+      } catch (error) {
+        console.error('获取文件图标失败:', error);
+        return this.iconManager.getDefaultIcon('unknown');
+      }
+    });
+
     // 通用网络请求（主进程代发）
     ipcMain.handle('net.request', async (event, reqOptions) => {
       return this.performRequest(reqOptions);
@@ -1164,14 +1186,52 @@ class MiniToolbox {
   // 剪贴板监听
   startClipboardMonitoring() {
     this.lastClipboardContent = clipboard.readText();
+    this.lastFileContent = ''; // 添加文件内容缓存
     
     this.clipboardTimer = setInterval(() => {
-      const currentContent = clipboard.readText();
-      if (currentContent !== this.lastClipboardContent) {
+      // 检查文本内容
+      const currentTextContent = clipboard.readText();
+      
+      // 检查是否有文件
+      let currentContent = currentTextContent;
+      let currentFileContent = '';
+      
+      try {
+        // 尝试读取文件路径（Windows）
+        if (process.platform === 'win32') {
+          const buffer = clipboard.readBuffer('FileNameW');
+          if (buffer && buffer.length > 2) { // 至少要有有效内容
+            // 解析Windows文件路径
+            const filePath = buffer.toString('ucs2').replace(/\0/g, '').trim();
+            // 验证是否是有效的文件路径
+            if (filePath && 
+                filePath.length > 3 && 
+                (filePath.includes('\\') || filePath.includes('/')) &&
+                filePath.includes('.')) {
+              currentFileContent = filePath;
+              currentContent = currentFileContent;
+            }
+          }
+        }
+      } catch (error) {
+        // 文件读取失败，静默处理
+      }
+      
+      // 检查内容是否真的变化了（避免重复检测）
+      const contentChanged = currentContent !== this.lastClipboardContent;
+      const fileChanged = currentFileContent !== this.lastFileContent;
+      
+      if (contentChanged || (currentFileContent && fileChanged)) {
+        // 内容变化处理
+        
         this.lastClipboardContent = currentContent;
+        this.lastFileContent = currentFileContent;
         this.onClipboardChange(currentContent);
-        // 记录到历史
-        this.clipboardStore.add(currentContent).catch(() => {});
+        
+        // 记录到历史（只记录文本内容）
+        if (currentTextContent && currentTextContent.trim() && currentTextContent !== currentFileContent) {
+          this.clipboardStore.add(currentTextContent).catch(() => {});
+        }
       }
     }, 500);
   }

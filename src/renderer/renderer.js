@@ -40,6 +40,9 @@ class MiniToolboxRenderer {
     // 拖拽状态管理
     this._isDragging = false;
     
+    // 待处理的剪贴板内容
+    this.pendingClipboardContent = null;
+    
     this.init();
   }
 
@@ -122,7 +125,14 @@ class MiniToolboxRenderer {
     window.addEventListener('focus', () => {
       // 重置自动填充状态，允许重新自动填充剪贴板内容
       this.autoFillEnabled = true;
-      this.focusInput();
+      
+      // 如果有待处理的剪贴板内容且输入框为空，优先使用
+      if (this.pendingClipboardContent && !this.actualContent.trim()) {
+        this.setContent(this.pendingClipboardContent, false);
+        this.pendingClipboardContent = null;
+      } else {
+        this.focusInput();
+      }
     });
 
     // 窗口失去焦点时的处理
@@ -132,6 +142,8 @@ class MiniToolboxRenderer {
         setTimeout(() => {
           // 再次检查是否仍然失去焦点且不在编辑模式
           if (!document.hasFocus() && !this.isEditingMode) {
+            // 隐藏窗口前清除内容
+            this.clearContent();
             try {
               ipcRenderer.send('hide-main-window');
             } catch {}
@@ -155,6 +167,8 @@ class MiniToolboxRenderer {
         if (!inInput && !inResults && !inEditArea && !inCapsule) {
           // 记录隐藏时间，用于判断是否需要清除输入
           this.lastInputTime = Date.now();
+          // 隐藏窗口前清除内容
+          this.clearContent();
           ipcRenderer.send('hide-main-window');
         }
       } catch {}
@@ -267,12 +281,10 @@ class MiniToolboxRenderer {
         e.preventDefault();
         e.stopPropagation();
         
-        // 胶囊模式下，编辑胶囊内容
-        if (this.capsuleMode && this.capsuleData) {
-          this.actualContent = this.capsuleData.content;
-          this.hideCapsule();
+        // 只有文本胶囊可以编辑
+        if (this.capsuleMode && this.capsuleData && this.capsuleData.type === 'text') {
+          this.showEditArea();
         }
-        this.showEditArea();
       });
     }
 
@@ -378,8 +390,15 @@ class MiniToolboxRenderer {
       return;
     }
     
-    if (content && content.trim() && document.hasFocus()) {
-      this.setContent(content, false); // 剪贴板变化不是手动输入
+    if (content && content.trim()) {
+      // 存储剪贴板内容，当窗口获得焦点时使用
+      this.pendingClipboardContent = content;
+      
+      // 如果窗口有焦点且输入框为空，立即处理
+      if (document.hasFocus() && !this.actualContent.trim()) {
+        this.setContent(content, false);
+        this.pendingClipboardContent = null;
+      }
     }
   }
 
@@ -405,8 +424,8 @@ class MiniToolboxRenderer {
     // 处理文件
     if (clipboardData.files && clipboardData.files.length > 0) {
       const file = clipboardData.files[0];
-      this.searchInput.value = file.path || file.name;
-      this.performSearch();
+      const filePath = file.path || file.name;
+      this.setContent(filePath, false); // 使用setContent处理文件路径
       return;
     }
     
@@ -423,8 +442,8 @@ class MiniToolboxRenderer {
     const files = e.dataTransfer.files;
     if (files.length > 0) {
       const file = files[0];
-      this.searchInput.value = file.path || file.name;
-      this.performSearch();
+      const filePath = file.path || file.name;
+      this.setContent(filePath, false); // 使用setContent处理文件路径
     } else {
       const droppedText = e.dataTransfer.getData('text/plain');
       if (droppedText) {
@@ -439,6 +458,7 @@ class MiniToolboxRenderer {
     switch (e.key) {
       case 'Escape':
         e.preventDefault();
+        this.clearContent();
         ipcRenderer.send('hide-main-window');
         break;
         
@@ -1064,7 +1084,7 @@ class MiniToolboxRenderer {
   }
 
   // 多行文本处理核心方法
-  setContent(content, isManualInput = false) {
+  async setContent(content, isManualInput = false) {
     if (!content) {
       this.clearContent();
       return;
@@ -1074,11 +1094,20 @@ class MiniToolboxRenderer {
     
     // 判断是否应该显示胶囊
     if (this.shouldShowCapsule(content, isManualInput)) {
-      const capsuleData = this.createTextCapsule(content);
-      this.showCapsule(capsuleData);
-      // 使用胶囊内容进行搜索
-      this.performSearchWithCapsule();
-      return;
+      try {
+        const capsuleData = await this.createCapsule(content);
+        this.showCapsule(capsuleData);
+        // 使用胶囊内容进行搜索
+        this.performSearchWithCapsule();
+        return;
+      } catch (error) {
+        console.error('创建胶囊失败:', error);
+        // 降级到文本胶囊
+        const textCapsule = this.createTextCapsule(content);
+        this.showCapsule(textCapsule);
+        this.performSearchWithCapsule();
+        return;
+      }
     }
 
     // 直接在输入框显示内容
@@ -1127,7 +1156,11 @@ class MiniToolboxRenderer {
 
   showEditArea() {
     if (this.editTextarea) {
-      this.editTextarea.value = this.actualContent;
+      // 如果是胶囊模式，使用胶囊内容；否则使用actualContent
+      const contentToEdit = this.capsuleMode && this.capsuleData ? 
+        this.capsuleData.content : this.actualContent;
+      
+      this.editTextarea.value = contentToEdit;
       this.editTextarea.focus();
       
       // 自动调整高度
@@ -1139,8 +1172,7 @@ class MiniToolboxRenderer {
       this.editArea.style.display = 'block';
     }
     
-    // 不隐藏输入显示区域，让用户能看到上下文
-    // 但确保胶囊已被隐藏（在调用此方法前已经调用了hideCapsule）
+    // 保持胶囊显示状态，不隐藏
     
     // 隐藏插件列表
     const resultsContainer = document.getElementById('resultsContainer');
@@ -1161,8 +1193,6 @@ class MiniToolboxRenderer {
     if (this.editArea) {
       this.editArea.style.display = 'none';
     }
-    
-    // 输入显示区域一直保持显示，不需要重新显示
     
     // 重新显示插件列表
     const resultsContainer = document.getElementById('resultsContainer');
@@ -1187,10 +1217,36 @@ class MiniToolboxRenderer {
   saveMultilineContent() {
     if (this.editTextarea) {
       const newContent = this.editTextarea.value;
-      // 用户编辑过的内容，需要判断是否应该胶囊化
-      this.setContent(newContent, false);
+      
+      if (this.capsuleMode && this.capsuleData) {
+        // 胶囊模式下，更新胶囊内容
+        this.updateCapsuleContent(newContent);
+      } else {
+        // 非胶囊模式，正常设置内容
+        this.setContent(newContent, false);
+      }
     }
     this.hideEditArea();
+  }
+  
+  // 更新胶囊内容
+  updateCapsuleContent(newContent) {
+    if (!this.capsuleMode || !this.capsuleData) return;
+    
+    // 更新实际内容
+    this.actualContent = newContent;
+    
+    // 重新创建胶囊数据
+    if (this.capsuleData.type === 'text') {
+      const updatedCapsule = this.createTextCapsule(newContent);
+      this.capsuleData = updatedCapsule;
+      
+      // 更新胶囊显示
+      if (this.capsuleText) {
+        this.capsuleText.textContent = updatedCapsule.displayText;
+        this.capsuleText.title = updatedCapsule.content;
+      }
+    }
   }
 
   // 获取当前的实际内容（用于插件）
@@ -1209,8 +1265,44 @@ class MiniToolboxRenderer {
     if (!content || typeof content !== 'string') return false;
     // 用户手动输入不显示胶囊
     if (isManualInput) return false;
+    
+    // 检查是否为文件路径
+    if (this.isFilePath(content)) {
+      return true; // 文件路径总是显示胶囊
+    }
+    
     // 长度大于50显示胶囊
     return content.trim().length > 50;
+  }
+
+  // 检查是否为文件路径
+  isFilePath(content) {
+    if (!content || typeof content !== 'string') return false;
+    
+    const trimmed = content.trim();
+    const filePaths = [
+      /^[a-zA-Z]:[\\\/]/,                    // Windows: C:\
+      /^\/[^\/]/,                            // Unix: /home
+      /^\.{1,2}[\\\/]/,                     // 相对路径: ./ ../
+      /^\\\\[^\\]/,                         // UNC: \\server
+      /[\\\/].*\.[a-zA-Z0-9]{1,10}$/        // 包含路径分隔符且有扩展名
+    ];
+    
+    const result = filePaths.some(pattern => pattern.test(trimmed));
+    return result;
+  }
+
+  // 创建胶囊（根据内容类型自动选择）
+  async createCapsule(content) {
+    const trimmed = content.trim();
+    
+    // 检查是否为文件路径
+    if (this.isFilePath(trimmed)) {
+      return await this.createFileCapsule(trimmed);
+    }
+    
+    // 否则创建文本胶囊
+    return this.createTextCapsule(trimmed);
   }
 
   // 创建文本胶囊
@@ -1237,6 +1329,55 @@ class MiniToolboxRenderer {
     };
   }
 
+  // 创建文件胶囊
+  async createFileCapsule(filePath) {
+    const fileName = this.getFileName(filePath);
+    const fileExt = this.getFileExtension(filePath);
+    
+    try {
+      // 获取系统图标
+      const iconData = await ipcRenderer.invoke('get-file-icon', filePath);
+      
+      return {
+        type: 'file',
+        content: filePath,
+        displayText: fileName,
+        icon: iconData.type === 'native' ? iconData.data : iconData.data, // 系统图标或emoji
+        iconType: iconData.type,
+        fileName: fileName,
+        fileExt: fileExt,
+        filePath: filePath
+      };
+    } catch (error) {
+      console.error('获取文件图标失败:', error);
+      
+      // 降级到默认图标
+      return {
+        type: 'file',
+        content: filePath,
+        displayText: fileName,
+        icon: '📁',
+        iconType: 'emoji',
+        fileName: fileName,
+        fileExt: fileExt,
+        filePath: filePath
+      };
+    }
+  }
+
+  // 获取文件名
+  getFileName(filePath) {
+    const parts = filePath.replace(/\\/g, '/').split('/');
+    return parts[parts.length - 1] || 'unknown';
+  }
+
+  // 获取文件扩展名
+  getFileExtension(filePath) {
+    const fileName = this.getFileName(filePath);
+    const match = fileName.match(/\.([a-zA-Z0-9]+)$/i);
+    return match ? match[1].toLowerCase() : '';
+  }
+
   // 显示胶囊
   showCapsule(capsuleData) {
     if (!this.contentCapsule || !capsuleData) return;
@@ -1249,8 +1390,31 @@ class MiniToolboxRenderer {
       this.capsuleText.textContent = capsuleData.displayText;
       this.capsuleText.title = capsuleData.content; // 鼠标悬停显示完整内容
     }
+    
     if (this.capsuleIcon) {
-      this.capsuleIcon.textContent = capsuleData.icon;
+      // 根据图标类型设置显示
+      if (capsuleData.iconType === 'native' && capsuleData.icon.startsWith('data:')) {
+        // 系统图标（base64图片）
+        this.capsuleIcon.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = capsuleData.icon;
+        img.style.width = '16px';
+        img.style.height = '16px';
+        img.style.objectFit = 'contain';
+        this.capsuleIcon.appendChild(img);
+      } else {
+        // Emoji图标
+        this.capsuleIcon.textContent = capsuleData.icon;
+        this.capsuleIcon.innerHTML = this.capsuleIcon.textContent; // 清除可能的img元素
+      }
+    }
+
+    // 根据胶囊类型添加CSS类
+    this.contentCapsule.classList.remove('file-capsule', 'text-capsule');
+    if (capsuleData.type === 'file') {
+      this.contentCapsule.classList.add('file-capsule');
+    } else {
+      this.contentCapsule.classList.add('text-capsule');
     }
 
     // 显示胶囊
@@ -1281,6 +1445,9 @@ class MiniToolboxRenderer {
     // 隐藏胶囊
     this.contentCapsule.classList.add('hidden');
     this.contentCapsule.style.display = 'none';
+    
+    // 清除胶囊类型样式
+    this.contentCapsule.classList.remove('file-capsule', 'text-capsule');
 
     // 移除输入框胶囊模式
     if (this.inputDisplay) {

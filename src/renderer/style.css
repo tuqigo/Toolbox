@@ -58,8 +58,8 @@ body {
 .content-capsule {
     max-width: 30%; /* 最大宽度30% */
     height: 80%; /* 输入区域高度的80% */
-    background: rgba(0, 122, 255, 0.1);
-    border: 1px dashed rgba(0, 122, 255, 0.3);
+    background: var(--mt-hover);
+    border: 1px dashed var(--mt-border);
     border-radius: 8px;
     padding: 4px 8px;
     cursor: pointer;
@@ -75,8 +75,28 @@ body {
 }
 
 .content-capsule:hover {
-    background: rgba(0, 122, 255, 0.15);
-    border-color: rgba(0, 122, 255, 0.5);
+    background: var(--mt-hover-strong);
+    border-color: var(--mt-text-muted);
+}
+
+/* 文件胶囊 - 实线边框 */
+.content-capsule.file-capsule {
+    border-style: solid;
+}
+
+/* 文件胶囊的图标不可点击 */
+.content-capsule.file-capsule .capsule-icon {
+    cursor: default;
+    opacity: 0.6;
+}
+
+.content-capsule.file-capsule .capsule-icon:hover {
+    background: transparent;
+}
+
+/* 文本胶囊 - 虚线边框 */
+.content-capsule.text-capsule {
+    border-style: dashed;
 }
 
 .capsule-content {
@@ -90,7 +110,7 @@ body {
 
 .capsule-text {
     font-size: 12px;
-    color: #007AFF;
+    color: var(--mt-fg);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -104,10 +124,22 @@ body {
     padding: 2px 4px;
     border-radius: 4px;
     transition: background-color 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    min-height: 16px;
 }
 
 .capsule-icon:hover {
-    background: rgba(0, 122, 255, 0.1);
+    background: var(--mt-hover);
+}
+
+.capsule-icon img {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+    display: block;
 }
 
 #searchInput {
