@@ -1104,6 +1104,38 @@ class MiniToolbox {
       });
     });
 
+    // 插件内搜索（search 模式按回车）
+    ipcMain.on('plugin-search', async (_e, payload) => {
+      try {
+        const { pluginId, featureCode, query, inputData } = payload || {};
+        const plugin = this.pluginManager.get(pluginId);
+        if (!plugin) return;
+        const jsPath = path.join(plugin.path, 'script.js');
+        if (!fs.existsSync(jsPath)) return;
+        const pluginModule = require(jsPath);
+        const featureHandler = pluginModule[featureCode];
+        if (!featureHandler || typeof featureHandler !== 'object') return;
+
+        if (typeof featureHandler.handleSearch === 'function') {
+          const callbackSetList = (items) => {
+            this.sendListResults(pluginId, items, inputData);
+          };
+          const redirect = (targetPluginId, content) => {
+            this.redirectToPlugin(targetPluginId, content);
+          };
+          const action = {
+            payload: inputData && inputData.content,
+            type: inputData && inputData.type,
+            featureCode: featureCode,
+            redirect: redirect
+          };
+          await featureHandler.handleSearch(action, String(query || ''), callbackSetList);
+        }
+      } catch (error) {
+        console.error('处理插件搜索事件失败:', error);
+      }
+    });
+
     // 处理列表项选择事件
     ipcMain.on('plugin-list-select', async (event, pluginId, itemData, inputData) => {
       try {

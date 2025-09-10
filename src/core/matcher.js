@@ -115,11 +115,24 @@ class Matcher {
         const used = usageScores[pluginId] || 0;
         if (used > 0) score += Math.min(30, Math.floor(Math.log2(used + 1) * 10));
 
+        // 附加 feature UI 配置（mode/copyField/copyEnabled/placeholder）
+        const fcfg = (meta.featuresMap && meta.featuresMap[feature.code]) || {
+          mode: meta.defaultMode || 'list',
+          copyField: meta.defaultCopyField || 'description',
+          // 默认关闭复制（除非显式开启）
+          copyEnabled: meta.defaultCopyEnabled === true,
+          placeholder: ''
+        };
+
         results.push({ 
           meta, 
           feature, 
           score, 
-          matchedBy: feature.matchedBy 
+          matchedBy: feature.matchedBy,
+          featureMode: fcfg.mode,
+          featureCopyField: fcfg.copyField,
+          featureCopyEnabled: fcfg.copyEnabled !== false,
+          featurePlaceholder: fcfg.placeholder || ''
         });
       }
     }
@@ -136,7 +149,12 @@ class Matcher {
       hasUi: !!r.meta.ui,
       // 新增 feature 信息
       featureCode: r.feature.code,
-      featureExplain: r.feature.explain
+      featureExplain: r.feature.explain,
+      // 透传 feature UI 配置
+      mode: r.featureMode,
+      copyField: r.featureCopyField,
+      copyEnabled: r.featureCopyEnabled,
+      placeholder: r.featurePlaceholder
     }));
   }
 }

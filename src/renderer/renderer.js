@@ -46,9 +46,72 @@ class MiniToolboxRenderer {
     // 响应式尺寸缓存
     this.responsiveSizes = null;
     
+    // 搜索模式状态
+    this.searchMode = false; // 是否处于 feature 搜索模式
+    this.searchFeature = null; // { pluginId, featureCode, name, icon, placeholder, copyField, copyEnabled }
+    this._isSearchCapsule = false; // 当前胶囊是否为搜索胶囊
+    
     this.init();
   }
 
+  // 进入 feature 搜索模式
+  enterSearchMode({ pluginId, featureCode, name, icon, copyField, copyEnabled, placeholder }) {
+    this.searchMode = true;
+    this.searchFeature = { pluginId, featureCode, name, icon, copyField, copyEnabled, placeholder };
+
+    // 显示搜索胶囊
+    const capsuleData = {
+      type: 'text',
+      content: `搜索: ${name}`,
+      displayText: `🔍 ${name}`,
+      icon: icon || '🔍',
+      iconType: 'emoji'
+    };
+    this._isSearchCapsule = true;
+    this.showCapsule(capsuleData);
+
+    // 设置占位符
+    if (this.searchInput) {
+      this.searchInput.value = '';
+      this.searchInput.setAttribute('placeholder', placeholder || `输入关键词搜索 ${name}...`);
+      this.searchInput.focus();
+    }
+  }
+
+  // 退出 feature 搜索模式
+  exitSearchMode() {
+    this.searchMode = false;
+    this.searchFeature = null;
+    if (this.searchInput) {
+      this.searchInput.setAttribute('placeholder', '输入任何内容...');
+      this.searchInput.value = '';
+    }
+    if (this._isSearchCapsule) {
+      this._isSearchCapsule = false;
+      this.hideCapsule();
+    }
+    // 恢复普通匹配
+    this.performSearch();
+  }
+
+  // 触发插件内搜索（按回车）
+  triggerFeatureSearch(query) {
+    if (!this.searchMode || !this.searchFeature) return;
+    const { pluginId, featureCode, copyField, copyEnabled } = this.searchFeature;
+    const base = this.currentContentAnalysis || { content: '', type: 'text' };
+    const inputData = {
+      content: base.content || '',
+      type: base.type || 'text',
+      length: String(base.content || '').length,
+      lines: String(base.content || '').split('\n').length,
+      timestamp: Date.now(),
+      inputMode: 'feature-search',
+      featureCode,
+      copyField,
+      copyEnabled
+    };
+    ipcRenderer.send('plugin-search', { pluginId, featureCode, query, inputData });
+  }
   init() {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => this.initElements());
@@ -95,6 +158,10 @@ class MiniToolboxRenderer {
     this.searchInput.addEventListener('input', () => {
       this.lastInputTime = Date.now(); // 记录输入时间
       this.autoFillEnabled = false; // 用户手动输入时禁用自动填充
+      // 搜索模式下不重新匹配插件，仅在回车时触发 handleSearch
+      if (this.searchMode) {
+        return;
+      }
       
       if (this.capsuleMode) {
         // 胶囊模式下，输入的是筛选文本
@@ -462,6 +529,11 @@ class MiniToolboxRenderer {
     
     switch (e.key) {
       case 'Escape':
+        if (this.searchMode) {
+          e.preventDefault();
+          this.exitSearchMode();
+          return;
+        }
         e.preventDefault();
         this.clearContent();
         ipcRenderer.send('hide-main-window');
@@ -484,6 +556,14 @@ class MiniToolboxRenderer {
         break;
         
       case 'Enter':
+        if (this.searchMode) {
+          e.preventDefault();
+          const query = (this.searchInput && this.searchInput.value) ? this.searchInput.value.trim() : '';
+          if (query) {
+            this.triggerFeatureSearch(query);
+            return;
+          }
+        }
         e.preventDefault();
         if (this.selectedIndex >= 0 && results.length > 0) {
           const selectedResult = results[this.selectedIndex];
@@ -496,6 +576,11 @@ class MiniToolboxRenderer {
         if (this.capsuleMode && this.searchInput.value === '' && this.searchInput.selectionStart === 0) {
           e.preventDefault();
           this.deleteCapsule();
+        }
+        // 搜索模式下，空输入退格退出
+        if (this.searchMode && this.searchInput.value === '' && this.searchInput.selectionStart === 0) {
+          e.preventDefault();
+          this.exitSearchMode();
         }
         break;
     }
@@ -640,6 +725,10 @@ class MiniToolboxRenderer {
              data-feature-code="${plugin.featureCode || ''}" 
              data-matched-by="${plugin.matchedBy || ''}" 
              data-has-ui="${plugin.hasUi ? 'true' : 'false'}" 
+             data-mode="${(plugin.mode || '').toLowerCase()}"
+             data-copy-field="${plugin.copyField || ''}"
+             data-copy-enabled="${plugin.copyEnabled !== false ? 'true' : 'false'}"
+             data-placeholder="${plugin.placeholder || ''}"
              data-index="${index}">
           <div class="result-icon">${plugin.icon}</div>
           <div class="result-content">
@@ -828,6 +917,11 @@ class MiniToolboxRenderer {
     listContainer.style.maxHeight = '300px';
     listContainer.style.overflowY = 'auto';
 
+    // 复制配置
+    const copyField = (inputData && inputData.copyField) ? inputData.copyField : 'description';
+    // 默认关闭复制，只有当 copyEnabled===true 时开启
+    const copyEnabled = !!(inputData && inputData.copyEnabled === true);
+
     // 渲染列表项
     items.forEach((item, index) => {
       const itemEl = document.createElement('div');
@@ -840,15 +934,18 @@ class MiniToolboxRenderer {
       itemEl.style.transition = 'background-color 0.2s';
 
       // 悬停效果：可点击使用强 hover，不可点击弱化并去除悬停背景
+      let copyBtn = null;
       itemEl.addEventListener('mouseenter', () => {
         if (isClickable) {
           itemEl.style.background = 'var(--mt-hover-strong)';
         } else {
           itemEl.style.background = 'transparent';
         }
+        if (copyBtn) copyBtn.style.visibility = 'visible';
       });
       itemEl.addEventListener('mouseleave', () => {
         itemEl.style.background = 'transparent';
+        if (copyBtn) copyBtn.style.visibility = 'hidden';
       });
       itemEl.addEventListener('click', (e) => {
         // 阻止冒泡，避免触发外层卡片的点击（执行插件）
@@ -870,13 +967,42 @@ class MiniToolboxRenderer {
       descEl.style.wordBreak = 'break-word';
       descEl.textContent = item.description || '';
       
+      // 右侧复制按钮
+      if (copyEnabled) {
+        copyBtn = document.createElement('button');
+        copyBtn.textContent = '复制';
+        copyBtn.style.marginLeft = '8px';
+        copyBtn.style.visibility = 'hidden';
+        copyBtn.style.fontSize = '12px';
+        copyBtn.style.padding = '2px 8px';
+        copyBtn.style.border = '1px solid var(--mt-border)';
+        copyBtn.style.borderRadius = '4px';
+        copyBtn.style.background = 'var(--mt-panel)';
+        copyBtn.style.cursor = 'pointer';
+        copyBtn.addEventListener('click', async (e) => {
+          if (e && e.stopPropagation) e.stopPropagation();
+          try {
+            const text = (copyField && item && item[copyField] != null) ? String(item[copyField]) : String(item.description || '');
+            await ipcRenderer.invoke('write-clipboard', text);
+          } catch {}
+        });
+      }
+      
       // 不可点击的视觉区分
       if (!isClickable) {
         itemEl.style.opacity = '0.6';
         titleEl.style.color = 'var(--mt-text-muted)';
       }
 
-      itemEl.appendChild(titleEl);
+      // 顶部行：标题 + 复制
+      const topRow = document.createElement('div');
+      topRow.style.display = 'flex';
+      topRow.style.alignItems = 'center';
+      topRow.style.justifyContent = 'space-between';
+      topRow.appendChild(titleEl);
+      if (copyBtn) topRow.appendChild(copyBtn);
+
+      itemEl.appendChild(topRow);
       itemEl.appendChild(descEl);
       listContainer.appendChild(itemEl);
     });
@@ -964,9 +1090,42 @@ class MiniToolboxRenderer {
     const featureCode = resultElement.dataset.featureCode || '';
     const matchedBy = resultElement.dataset.matchedBy || '';
     const hasUi = resultElement.dataset.hasUi === 'true';
+    const mode = (resultElement.dataset.mode || '').toLowerCase();
+    const copyField = resultElement.dataset.copyField || 'description';
+    // dataset 是字符串；仅当显式 'true' 时开启
+    const copyEnabled = (resultElement.dataset.copyEnabled === 'true');
+    const placeholder = resultElement.dataset.placeholder || '';
     
     if (!pluginId || !this.currentContentAnalysis) {
       console.error('无法执行插件: 缺少必要信息');
+      return;
+    }
+
+    // 搜索模式：点击卡片进入搜索状态（无UI）
+    if (!hasUi && mode === 'search') {
+      const titleEl = resultElement.querySelector('.result-title');
+      const iconEl = resultElement.querySelector('.result-icon');
+      const name = (titleEl && titleEl.textContent) || featureCode || pluginId;
+      const icon = (iconEl && iconEl.textContent) || '🔍';
+      // 进入搜索模式（胶囊 + placeholder）
+      this.enterSearchMode({ pluginId, featureCode, name, icon, copyField, copyEnabled, placeholder });
+      // 仅保留该 feature 的卡片
+      this.showOnlyFeatureCard(pluginId, featureCode);
+      // 触发一次 handleEnter，用于展示初始列表（通过现有无UI执行链）
+      const base = this.currentContentAnalysis || { content: '', type: 'text' };
+      const contentToSend = matchedBy === 'command' ? '' : (this.actualContent || base.content || '');
+      const inputDataForEnter = {
+        content: contentToSend,
+        type: base.type || 'text',
+        length: String(contentToSend).length,
+        lines: String(contentToSend).split('\n').length,
+        timestamp: Date.now(),
+        inputMode: 'feature-enter',
+        featureCode: featureCode,
+        copyField: copyField,
+        copyEnabled: copyEnabled
+      };
+      try { ipcRenderer.send('execute-plugin', pluginId, inputDataForEnter); } catch {}
       return;
     }
 
@@ -985,7 +1144,9 @@ class MiniToolboxRenderer {
       timestamp: Date.now(),
       inputMode: matchedBy || 'content',
       // 新增 feature 信息
-      featureCode: featureCode
+      featureCode: featureCode,
+      copyField: copyField,
+      copyEnabled: copyEnabled
     };
 
     if (process.env.NODE_ENV === 'development') console.log('执行插件:', pluginId, '功能:', featureCode, inputData);

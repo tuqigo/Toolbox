@@ -67,6 +67,27 @@ class PluginManager {
     // 编译规则
     const compiledRules = this.ruleCompiler.compile(manifest);
 
+    // 解析 feature 配置（含继承与默认值）
+    const features = Array.isArray(manifest.features) ? manifest.features : [];
+    const defaultMode = manifest.mode || 'list';
+    const defaultCopyField = manifest.copyField || 'description';
+    // copyEnabled 默认关闭；仅显式 true 时开启
+    const defaultCopyEnabled = manifest.copyEnabled === true;
+    const featuresMap = {};
+    for (const f of features) {
+      if (!f || typeof f !== 'object' || !f.code) continue;
+      const effective = {
+        code: f.code,
+        explain: f.explain || '',
+        mode: f.mode || defaultMode || 'list',
+        copyField: (typeof f.copyField === 'string' && f.copyField) ? f.copyField : (defaultCopyField || 'description'),
+        // feature 优先级最高；默认关闭（除非 feature 或 顶层显式 true）
+        copyEnabled: (typeof f.copyEnabled === 'boolean') ? f.copyEnabled : defaultCopyEnabled,
+        placeholder: f.placeholder || ''
+      };
+      featuresMap[f.code] = effective;
+    }
+
     const meta = {
       id,
       name,
@@ -81,7 +102,13 @@ class PluginManager {
       isLocal: analysis.isLocal,
       installInfo: analysis.installInfo,
       // 不再依赖 manifest.preload；无 UI 情况下默认查找 script.js（兼容 preload.js）
-      compiledRules
+      compiledRules,
+      // feature 元信息（供匹配与渲染阶段使用）
+      featuresMap,
+      // 顶层默认（作为继承兜底）
+      defaultMode,
+      defaultCopyField,
+      defaultCopyEnabled
     };
 
     this.plugins.set(id, meta);
