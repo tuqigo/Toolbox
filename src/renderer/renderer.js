@@ -43,6 +43,9 @@ class MiniToolboxRenderer {
     // 待处理的剪贴板内容
     this.pendingClipboardContent = null;
     
+    // 响应式尺寸缓存
+    this.responsiveSizes = null;
+    
     this.init();
   }
 
@@ -74,6 +77,8 @@ class MiniToolboxRenderer {
       return;
     }
 
+    // 初始化响应式尺寸
+    this.initResponsiveSizes();
 
     this.setupEventListeners();
 
@@ -1433,8 +1438,8 @@ class MiniToolboxRenderer {
         return;
       }
       
-      // 检查文件大小（2MB限制）
-      const maxSize = 2 * 1024 * 1024; // 2MB
+      // 检查文件大小（使用配置的限制）
+      const maxSize = this.getMaxImageSizeMB() * 1024 * 1024;
       if (fileStats.size > maxSize) {
         console.warn('图片文件过大，已丢弃:', { filePath, size: fileStats.size, maxSize });
         this.updateCapsuleToError(capsuleData, '文件过大');
@@ -1486,8 +1491,9 @@ class MiniToolboxRenderer {
       this.capsuleIcon.innerHTML = '';
       const img = document.createElement('img');
       img.src = capsuleData.icon;
-      img.style.width = '32px';
-      img.style.height = '32px';
+      const thumbnailSize = this.getThumbnailSize();
+      img.style.width = `${thumbnailSize}px`;
+      img.style.height = `${thumbnailSize}px`;
       img.style.objectFit = 'cover';
       img.style.borderRadius = '4px';
       this.capsuleIcon.appendChild(img);
@@ -1547,7 +1553,7 @@ class MiniToolboxRenderer {
       
       // 检查数据大小（估算）
       const sizeEstimate = dataUrl.length * 0.75; // base64大约是原数据的1.33倍
-      const maxSize = 2 * 1024 * 1024; // 2MB
+      const maxSize = this.getMaxImageSizeMB() * 1024 * 1024;
       
       if (sizeEstimate > maxSize) {
         console.warn('剪贴板图片过大，已丢弃:', { size: sizeEstimate, maxSize });
@@ -1599,8 +1605,8 @@ class MiniToolboxRenderer {
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
           
-          // 缩略图尺寸（正方形）
-          const size = 32;
+          // 缩略图尺寸（正方形，使用动态计算的尺寸）
+          const size = this.getThumbnailSize();
           canvas.width = size;
           canvas.height = size;
           
@@ -1658,8 +1664,9 @@ class MiniToolboxRenderer {
         this.capsuleIcon.innerHTML = '';
         const img = document.createElement('img');
         img.src = capsuleData.icon;
-        img.style.width = '32px';
-        img.style.height = '32px';
+        const thumbnailSize = this.getThumbnailSize();
+        img.style.width = `${thumbnailSize}px`;
+        img.style.height = `${thumbnailSize}px`;
         img.style.objectFit = 'cover';
         img.style.borderRadius = '4px';
         this.capsuleIcon.appendChild(img);
@@ -1668,8 +1675,10 @@ class MiniToolboxRenderer {
         this.capsuleIcon.innerHTML = '';
         const img = document.createElement('img');
         img.src = capsuleData.icon;
-        img.style.width = '16px';
-        img.style.height = '16px';
+        // 系统图标尺寸为缩略图尺寸的70%
+        const iconSize = Math.floor(this.getThumbnailSize() * 0.7);
+        img.style.width = `${iconSize}px`;
+        img.style.height = `${iconSize}px`;
         img.style.objectFit = 'contain';
         this.capsuleIcon.appendChild(img);
       } else {
@@ -1910,6 +1919,81 @@ class MiniToolboxRenderer {
       // 鼠标离开窗口时也结束拖拽
       document.addEventListener('mouseleave', handleMouseUp);
     });
+  }
+
+  // 初始化响应式尺寸
+  async initResponsiveSizes() {
+    try {
+      // 从主进程获取响应式尺寸信息
+      this.responsiveSizes = await ipcRenderer.invoke('get-responsive-sizes');
+      console.log('响应式尺寸已加载:', JSON.stringify(this.responsiveSizes, null, 2));
+      
+      // 应用CSS变量
+      this.applyCSSVariables();
+    } catch (error) {
+      console.error('获取响应式尺寸失败:', error);
+      
+      // 使用默认尺寸
+      this.responsiveSizes = {
+        windowWidth: 700,
+        windowHeight: 450,
+        pluginListWidth: 680,
+        inputHeight: 54,
+        capsuleHeight: 46,
+        thumbnailSize: 41,
+        maxImageSizeMB: 2
+      };
+      
+      this.applyCSSVariables();
+    }
+  }
+
+  // 应用CSS变量
+  applyCSSVariables() {
+    if (!this.responsiveSizes) return;
+    
+    const root = document.documentElement;
+    const sizes = this.responsiveSizes;
+    
+    // 设置CSS变量
+    root.style.setProperty('--window-width', `${sizes.windowWidth}px`);
+    root.style.setProperty('--window-height', `${sizes.windowHeight}px`);
+    root.style.setProperty('--plugin-list-width', `${sizes.pluginListWidth}px`);
+    root.style.setProperty('--input-height', `${sizes.inputHeight}px`);
+    root.style.setProperty('--capsule-height', `${sizes.capsuleHeight}px`);
+    root.style.setProperty('--thumbnail-size', `${sizes.thumbnailSize}px`);
+    
+    console.log('CSS变量已应用:', JSON.stringify({
+      windowWidth: sizes.windowWidth,
+      windowHeight: sizes.windowHeight,
+      pluginListWidth: sizes.pluginListWidth,
+      inputHeight: sizes.inputHeight,
+      capsuleHeight: sizes.capsuleHeight,
+      thumbnailSize: sizes.thumbnailSize
+    }, null, 2));
+  }
+
+  // 获取响应式尺寸
+  getResponsiveSizes() {
+    return this.responsiveSizes || {
+      windowWidth: 700,
+      windowHeight: 450,
+      pluginListWidth: 680,
+      inputHeight: 54,
+      capsuleHeight: 46,
+      thumbnailSize: 41,
+      maxImageSizeMB: 2
+    };
+  }
+
+  // 获取缩略图尺寸
+  getThumbnailSize() {
+    return this.getResponsiveSizes().thumbnailSize;
+  }
+
+  // 获取最大图片大小限制
+  getMaxImageSizeMB() {
+    return this.getResponsiveSizes().maxImageSizeMB;
   }
 }
 

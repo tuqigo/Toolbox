@@ -35,7 +35,43 @@ class ConfigStore {
         fontSize: 'medium',        // 字体大小: 'small' | 'medium' | 'large'
         animations: true,          // 是否启用动画效果
         compactMode: false,        // 紧凑模式
-        showTypeIndicator: false   // 是否显示内容类型指示器
+        showTypeIndicator: false,  // 是否显示内容类型指示器
+        
+        // 响应式设计配置
+        responsive: {
+          // 最大图片大小限制(MB)
+          maxImageSizeMB: 2,
+          
+          // 窗口尺寸比例配置（相对于屏幕工作区）
+          windowSizeRatio: {
+            small: { width: 0.45, height: 0.35 },    // 小屏幕 (<1366px)
+            medium: { width: 0.4, height: 0.3 },     // 中等屏幕 (1366-1920px)
+            large: { width: 0.35, height: 0.25 }     // 大屏幕 (>1920px)
+          },
+          
+          // 最小/最大窗口尺寸限制
+          windowSizeLimit: {
+            minWidth: 600,
+            maxWidth: 1200,
+            minHeight: 400,
+            maxHeight: 800
+          },
+          
+          // 插件列表相对于主窗口的宽度比例
+          pluginListWidthRatio: 0.97,
+          
+          // 输入框高度比例（相对于窗口高度）
+          inputHeightRatio: 0.12,
+          
+          // 胶囊尺寸比例（相对于输入框）
+          capsuleRatio: {
+            height: 0.85,  // 胶囊高度 = 输入框高度 × 85%
+            maxWidth: 0.3  // 胶囊最大宽度 = 输入框宽度 × 30%
+          },
+          
+          // 缩略图尺寸比例（相对于胶囊高度）
+          thumbnailRatio: 0.9
+        }
       },
       
       // 插件相关配置
@@ -121,6 +157,7 @@ class ConfigStore {
 
   // 获取配置值
   get(path, defaultValue = null) {
+    if (typeof path !== 'string' || !path) return defaultValue;
     const keys = path.split('.');
     let current = this.config;
     

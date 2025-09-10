@@ -13,7 +13,7 @@ if (process.platform === 'win32') {
   }
 }
 
-const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, dialog, clipboard, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, dialog, clipboard, shell, screen } = require('electron');
 const path = require('path');
 const fs = require('fs-extra');
 const { PluginManager } = require('./core/pluginManager');
@@ -35,6 +35,11 @@ class MiniToolbox {
     this.isQuiet = process.argv.includes('--no-console');
     this.lastClipboardContent = '';
     this.clipboardTimer = null;
+    
+    // 屏幕信息缓存（启动时检测一次）
+    this.screenInfo = null;
+    this.windowSizes = null;
+    
     // 新核心
     this.configStore = new ConfigStore({ isQuiet: this.isQuiet });
     this.pluginManager = new PluginManager({ isQuiet: this.isQuiet });
@@ -243,13 +248,16 @@ class MiniToolbox {
 
   // 主窗口
   createMainWindow() {
+    // 获取计算好的窗口尺寸
+    const sizes = this.getWindowSizes();
+    
     this.mainWindow = new BrowserWindow({
-      width: 700,
-      height: 450,
-      minWidth: 700,
-      maxWidth: 700,
-      minHeight: 450,
-      maxHeight: 450,
+      width: sizes.windowWidth,
+      height: sizes.windowHeight,
+      minWidth: sizes.windowWidth,
+      maxWidth: sizes.windowWidth,
+      minHeight: sizes.windowHeight,
+      maxHeight: sizes.windowHeight,
       show: false,
       frame: false,
       transparent: true,
@@ -1185,6 +1193,16 @@ class MiniToolbox {
       }
     });
 
+    // 获取响应式尺寸信息
+    ipcMain.handle('get-responsive-sizes', () => {
+      return this.getWindowSizes();
+    });
+
+    // 获取屏幕信息
+    ipcMain.handle('get-screen-info', () => {
+      return this.getScreenInfo();
+    });
+
     // 通用网络请求（主进程代发）
     ipcMain.handle('net.request', async (event, reqOptions) => {
       return this.performRequest(reqOptions);
@@ -1500,6 +1518,9 @@ class MiniToolbox {
       await this.usageStore.load();
       await this.clipboardStore.load();
       
+      // 配置加载完成后检测屏幕信息（启动时检测一次）
+      this.detectScreenAndCalculateSizes();
+      
       this.createTray();
       this.createMainWindow();
       this.registerGlobalShortcuts();
@@ -1552,6 +1573,102 @@ class MiniToolbox {
     app.on('browser-window-created', (_e, win) => {
       try { hookWebContents(win.webContents); } catch {}
     });
+  }
+
+  // 检测屏幕信息并计算窗口尺寸（启动时调用一次）
+  detectScreenAndCalculateSizes() {
+    try {
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+      
+      // 确定屏幕类型
+      let screenType = 'medium';
+      if (screenWidth < 1366) {
+        screenType = 'small';
+      } else if (screenWidth >= 1920) {
+        screenType = 'large';
+      }
+      
+      // 缓存屏幕信息
+      this.screenInfo = {
+        width: screenWidth,
+        height: screenHeight,
+        type: screenType,
+        dpi: primaryDisplay.scaleFactor
+      };
+      
+      // 获取配置
+      const config = this.configStore.exportConfig ? this.configStore.exportConfig() : (this.configStore.config || {});
+      const responsiveConfig = config.ui.responsive;
+      const sizeRatio = responsiveConfig.windowSizeRatio[screenType];
+      const sizeLimit = responsiveConfig.windowSizeLimit;
+      
+      // 计算窗口尺寸
+      let windowWidth = Math.floor(screenWidth * sizeRatio.width);
+      let windowHeight = Math.floor(screenHeight * sizeRatio.height);
+      
+      // 应用尺寸限制
+      windowWidth = Math.max(sizeLimit.minWidth, Math.min(sizeLimit.maxWidth, windowWidth));
+      windowHeight = Math.max(sizeLimit.minHeight, Math.min(sizeLimit.maxHeight, windowHeight));
+      
+      // 计算插件列表宽度
+      const pluginListWidth = Math.floor(windowWidth * responsiveConfig.pluginListWidthRatio);
+      
+      // 层级计算：窗口 → 输入框 → 胶囊 → 缩略图
+      const inputHeight = Math.floor(windowHeight * responsiveConfig.inputHeightRatio);
+      const capsuleHeight = Math.floor(inputHeight * responsiveConfig.capsuleRatio.height);
+      const thumbnailSize = Math.floor(capsuleHeight * responsiveConfig.thumbnailRatio);
+      
+      // 缓存计算结果
+      this.windowSizes = {
+        windowWidth,
+        windowHeight,
+        pluginListWidth,
+        inputHeight,
+        capsuleHeight,
+        thumbnailSize,
+        maxImageSizeMB: responsiveConfig.maxImageSizeMB
+      };
+      
+      console.log('屏幕检测完成:', JSON.stringify({
+        screen: this.screenInfo,
+        sizes: this.windowSizes
+      }, null, 2));
+      
+      return this.windowSizes;
+    } catch (error) {
+      console.error('屏幕检测失败:', error);
+      
+      // 降级到默认尺寸
+      this.screenInfo = { width: 1920, height: 1080, type: 'medium', dpi: 1 };
+      this.windowSizes = {
+        windowWidth: 700,
+        windowHeight: 450,
+        pluginListWidth: 680,
+        inputHeight: 54,
+        capsuleHeight: 46,  // 54 × 0.85
+        thumbnailSize: 41,  // 46 × 0.9
+        maxImageSizeMB: 2
+      };
+      
+      return this.windowSizes;
+    }
+  }
+
+  // 获取屏幕信息
+  getScreenInfo() {
+    if (!this.screenInfo) {
+      this.detectScreenAndCalculateSizes();
+    }
+    return this.screenInfo;
+  }
+
+  // 获取窗口尺寸
+  getWindowSizes() {
+    if (!this.windowSizes) {
+      this.detectScreenAndCalculateSizes();
+    }
+    return this.windowSizes;
   }
 }
 

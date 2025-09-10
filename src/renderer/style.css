@@ -1,3 +1,14 @@
+/* 根变量定义 */
+:root {
+    /* 默认尺寸（会被JS动态覆盖） */
+    --window-width: 700px;
+    --window-height: 450px;
+    --plugin-list-width: 680px;
+    --input-height: 54px;
+    --capsule-height: 46px;
+    --thumbnail-size: 41px;
+}
+
 * {
     margin: 0;
     padding: 0;
@@ -12,7 +23,7 @@ body {
 
 .container {
     width: 100%;
-    height: 450px; /* 更新高度 */
+    height: var(--window-height);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -24,7 +35,7 @@ body {
 
 .search-box {
     width: 100%;
-    max-width: 680px; /* 增加宽度适应700px窗口 */
+    max-width: var(--plugin-list-width);
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(20px);
     border-radius: 12px;
@@ -49,7 +60,7 @@ body {
     position: relative;
     display: flex;
     align-items: center;
-    min-height: 52px; /* 确保有足够高度显示预览 */
+    min-height: var(--input-height); /* 使用动态计算的输入框高度 */
     gap: 8px; /* 胶囊和输入框之间的间距 */
     padding: 8px 20px;
 }
@@ -57,7 +68,8 @@ body {
 /* 胶囊样式 */
 .content-capsule {
     max-width: 30%; /* 最大宽度30% */
-    height: 80%; /* 输入区域高度的80% */
+    height: var(--capsule-height); /* 根据输入框动态计算的高度 */
+    max-height: var(--capsule-height); /* 确保不超过计算高度 */
     background: var(--mt-hover);
     border: 1px dashed var(--mt-border);
     border-radius: 8px;
@@ -68,6 +80,7 @@ body {
     align-items: center;
     justify-content: center;
     flex-shrink: 0; /* 不允许压缩 */
+    overflow: hidden; /* 防止内容溢出 */
 }
 
 .content-capsule.hidden {
@@ -123,8 +136,8 @@ body {
 
 /* 图片加载骨架屏 */
 .image-skeleton {
-    width: 32px;
-    height: 32px;
+    width: var(--thumbnail-size);
+    height: var(--thumbnail-size);
     border-radius: 4px;
     background: linear-gradient(90deg, 
         rgba(200, 200, 200, 0.2) 25%, 
@@ -171,7 +184,7 @@ body {
 }
 
 .capsule-icon {
-    font-size: 14px;
+    font-size: calc(var(--thumbnail-size) * 0.5); /* 字体大小基于缩略图尺寸 */
     flex-shrink: 0;
     cursor: pointer;
     padding: 2px 4px;
@@ -180,8 +193,8 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-width: 16px;
-    min-height: 16px;
+    min-width: var(--thumbnail-size);
+    min-height: var(--thumbnail-size);
 }
 
 .capsule-icon:hover {
@@ -189,8 +202,8 @@ body {
 }
 
 .capsule-icon img {
-    width: 16px;
-    height: 16px;
+    width: calc(var(--thumbnail-size) * 0.7); /* 系统图标尺寸 */
+    height: calc(var(--thumbnail-size) * 0.7);
     object-fit: contain;
     display: block;
 }
@@ -238,7 +251,7 @@ body {
 
 .results-container {
     width: 100%;
-    max-width: 680px; /* 匹配新的输入框宽度 */
+    max-width: var(--plugin-list-width);
     margin-top: 8px;
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(20px);
@@ -261,7 +274,7 @@ body {
 }
 
 .results-list {
-    max-height: 300px; /* 限制最大高度，约4-5个结果项 */
+    max-height: calc(var(--window-height) * 0.6); /* 最大高度为窗口高度的60% */
     overflow-y: auto; /* 添加垂直滚动 */
     min-height: 0;
 }
@@ -286,15 +299,15 @@ body {
 
 
 .result-icon {
-    width: 32px;
-    height: 32px;
+    width: var(--thumbnail-size);
+    height: var(--thumbnail-size);
     margin-right: 12px;
     border-radius: 6px;
     background: var(--mt-iconbg, #f0f0f0);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 16px;
+    font-size: calc(var(--thumbnail-size) * 0.5);
     flex-shrink: 0;
 }
 
@@ -380,7 +393,7 @@ body {
 }
 
 .empty-state-icon {
-    font-size: 32px;
+    font-size: calc(var(--thumbnail-size) * 1.2);
     margin-bottom: 12px;
     opacity: 0.5;
 }
@@ -395,8 +408,8 @@ body {
 
 #editTextarea {
     width: 100%;
-    min-height: 120px;
-    max-height: 300px;
+    min-height: calc(var(--window-height) * 0.25);
+    max-height: calc(var(--window-height) * 0.6);
     padding: 12px 16px;
     border: 1px solid var(--mt-border, rgba(0, 0, 0, 0.1));
     border-radius: 6px;
