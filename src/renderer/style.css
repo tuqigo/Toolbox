@@ -99,6 +99,59 @@ body {
     border-style: dashed;
 }
 
+/* 图片胶囊 - 实线边框 */
+.content-capsule.image-capsule {
+    border-style: solid;
+}
+
+/* 图片胶囊的图标不可点击 */
+.content-capsule.image-capsule .capsule-icon {
+    cursor: default;
+    opacity: 1;
+    padding: 0;
+}
+
+.content-capsule.image-capsule .capsule-icon:hover {
+    background: transparent;
+}
+
+/* 图片胶囊的缩略图样式 */
+.content-capsule.image-capsule .capsule-icon img {
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* 图片加载骨架屏 */
+.image-skeleton {
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, 
+        rgba(200, 200, 200, 0.2) 25%, 
+        rgba(200, 200, 200, 0.4) 50%, 
+        rgba(200, 200, 200, 0.2) 75%);
+    background-size: 200% 100%;
+    animation: skeleton-loading 1.5s infinite;
+}
+
+@keyframes skeleton-loading {
+    0% {
+        background-position: 200% 0;
+    }
+    100% {
+        background-position: -200% 0;
+    }
+}
+
+/* 暗黑主题下的骨架屏 */
+[data-theme="dark"] .image-skeleton {
+    background: linear-gradient(90deg, 
+        rgba(100, 100, 100, 0.2) 25%, 
+        rgba(150, 150, 150, 0.4) 50%, 
+        rgba(100, 100, 100, 0.2) 75%);
+    background-size: 200% 100%;
+}
+
 .capsule-content {
     display: flex;
     align-items: center;

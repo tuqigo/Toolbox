@@ -1163,6 +1163,28 @@ class MiniToolbox {
       }
     });
 
+    // 获取文件统计信息
+    ipcMain.handle('get-file-stats', async (event, filePath) => {
+      try {
+        const stats = await fs.stat(filePath);
+        return {
+          exists: true,
+          size: stats.size,
+          isFile: stats.isFile(),
+          isDirectory: stats.isDirectory(),
+          mtime: stats.mtime
+        };
+      } catch (error) {
+        return {
+          exists: false,
+          size: 0,
+          isFile: false,
+          isDirectory: false,
+          mtime: null
+        };
+      }
+    });
+
     // 通用网络请求（主进程代发）
     ipcMain.handle('net.request', async (event, reqOptions) => {
       return this.performRequest(reqOptions);
@@ -1211,6 +1233,17 @@ class MiniToolbox {
               currentFileContent = filePath;
               currentContent = currentFileContent;
             }
+          }
+        }
+
+        // 检查是否有图片数据
+        const image = clipboard.readImage();
+        if (!image.isEmpty()) {
+          // 有图片数据，生成临时文件路径标识
+          const imageDataUrl = image.toDataURL();
+          if (imageDataUrl && imageDataUrl !== 'data:image/png;base64,') {
+            // 创建一个特殊的标识，表示这是剪贴板图片数据
+            currentContent = `[CLIPBOARD-IMAGE]${imageDataUrl}`;
           }
         }
       } catch (error) {

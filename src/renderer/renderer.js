@@ -1292,12 +1292,30 @@ class MiniToolboxRenderer {
     return result;
   }
 
+  // 检查是否为图片文件
+  isImageFile(filePath) {
+    if (!filePath || typeof filePath !== 'string') return false;
+    
+    const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
+    const ext = this.getFileExtension(filePath).toLowerCase();
+    return imageExts.includes(ext);
+  }
+
   // 创建胶囊（根据内容类型自动选择）
   async createCapsule(content) {
     const trimmed = content.trim();
     
+    // 检查是否为剪贴板图片数据
+    if (trimmed.startsWith('[CLIPBOARD-IMAGE]')) {
+      return await this.createClipboardImageCapsule(trimmed);
+    }
+    
     // 检查是否为文件路径
     if (this.isFilePath(trimmed)) {
+      // 检查是否为图片文件
+      if (this.isImageFile(trimmed)) {
+        return await this.createImageCapsule(trimmed);
+      }
       return await this.createFileCapsule(trimmed);
     }
     
@@ -1378,6 +1396,287 @@ class MiniToolboxRenderer {
     return match ? match[1].toLowerCase() : '';
   }
 
+  // 创建图片胶囊
+  async createImageCapsule(filePath) {
+    const fileName = this.getFileName(filePath);
+    const fileExt = this.getFileExtension(filePath);
+    
+    console.log('开始创建图片胶囊:', filePath);
+    
+    // 立即返回loading状态的胶囊
+    const loadingCapsule = {
+      type: 'image',
+      content: filePath,
+      displayText: fileName,
+      icon: null, // 无图标，显示骨架屏
+      iconType: 'loading',
+      fileName: fileName,
+      fileExt: fileExt,
+      filePath: filePath,
+      isLoading: true
+    };
+    
+    // 异步处理图片加载
+    this.processImageAsync(filePath, loadingCapsule);
+    
+    return loadingCapsule;
+  }
+
+  // 异步处理图片
+  async processImageAsync(filePath, capsuleData) {
+    try {
+      // 检查文件是否存在和大小
+      const fileStats = await this.getFileStats(filePath);
+      if (!fileStats.exists) {
+        console.warn('图片文件不存在:', filePath);
+        this.updateCapsuleToError(capsuleData, '文件不存在');
+        return;
+      }
+      
+      // 检查文件大小（2MB限制）
+      const maxSize = 2 * 1024 * 1024; // 2MB
+      if (fileStats.size > maxSize) {
+        console.warn('图片文件过大，已丢弃:', { filePath, size: fileStats.size, maxSize });
+        this.updateCapsuleToError(capsuleData, '文件过大');
+        return;
+      }
+      
+      // 生成缩略图
+      const thumbnailData = await this.generateThumbnail(filePath);
+      
+      // 更新胶囊数据
+      capsuleData.icon = thumbnailData || '🖼️';
+      capsuleData.iconType = thumbnailData ? 'thumbnail' : 'emoji';
+      capsuleData.isLoading = false;
+      
+      // 如果当前正在显示这个胶囊，更新UI
+      if (this.capsuleData === capsuleData) {
+        this.updateCapsuleDisplay(capsuleData);
+      }
+      
+      console.log('图片胶囊加载完成:', filePath);
+    } catch (error) {
+      console.error('图片胶囊处理失败:', error);
+      this.updateCapsuleToError(capsuleData, '处理失败');
+    }
+  }
+
+  // 更新胶囊为错误状态
+  updateCapsuleToError(capsuleData, errorMessage) {
+    capsuleData.icon = '❌';
+    capsuleData.iconType = 'emoji';
+    capsuleData.isLoading = false;
+    capsuleData.error = errorMessage;
+    
+    // 如果当前正在显示这个胶囊，更新UI
+    if (this.capsuleData === capsuleData) {
+      this.updateCapsuleDisplay(capsuleData);
+    }
+  }
+
+  // 更新胶囊显示
+  updateCapsuleDisplay(capsuleData) {
+    if (!this.capsuleIcon || !capsuleData) return;
+    
+    if (capsuleData.iconType === 'loading') {
+      // 显示骨架屏
+      this.capsuleIcon.innerHTML = '<div class="image-skeleton"></div>';
+    } else if (capsuleData.iconType === 'thumbnail' && capsuleData.icon.startsWith('data:')) {
+      // 显示缩略图
+      this.capsuleIcon.innerHTML = '';
+      const img = document.createElement('img');
+      img.src = capsuleData.icon;
+      img.style.width = '32px';
+      img.style.height = '32px';
+      img.style.objectFit = 'cover';
+      img.style.borderRadius = '4px';
+      this.capsuleIcon.appendChild(img);
+    } else {
+      // 显示emoji
+      this.capsuleIcon.textContent = capsuleData.icon;
+    }
+  }
+
+  // 获取文件统计信息
+  async getFileStats(filePath) {
+    try {
+      const stats = await ipcRenderer.invoke('get-file-stats', filePath);
+      return stats;
+    } catch (error) {
+      console.error('获取文件统计信息失败:', error);
+      return { exists: false, size: 0 };
+    }
+  }
+
+  // 生成缩略图
+  async generateThumbnail(filePath) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      
+      // 设置超时
+      const timeout = setTimeout(() => {
+        console.warn('图片加载超时:', filePath);
+        resolve(null);
+      }, 5000);
+      
+      img.onload = () => {
+        clearTimeout(timeout);
+        try {
+          // 创建canvas生成缩略图
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          
+          // 缩略图尺寸（正方形）
+          const size = 32;
+          canvas.width = size;
+          canvas.height = size;
+          
+          // 计算缩放和裁剪参数（保持纵横比，居中裁剪）
+          const scale = Math.max(size / img.width, size / img.height);
+          const scaledWidth = img.width * scale;
+          const scaledHeight = img.height * scale;
+          const offsetX = (size - scaledWidth) / 2;
+          const offsetY = (size - scaledHeight) / 2;
+          
+          // 绘制缩略图
+          ctx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
+          
+          // 转换为base64
+          const thumbnailData = canvas.toDataURL('image/jpeg', 0.8);
+          console.log('缩略图生成成功:', filePath);
+          resolve(thumbnailData);
+        } catch (error) {
+          console.error('缩略图生成失败:', error);
+          resolve(null);
+        }
+      };
+      
+      img.onerror = () => {
+        clearTimeout(timeout);
+        console.error('图片加载失败:', filePath);
+        resolve(null);
+      };
+      
+      // 加载图片
+      img.src = `file://${filePath.replace(/\\/g, '/')}`;
+    });
+  }
+
+  // 创建剪贴板图片胶囊
+  async createClipboardImageCapsule(content) {
+    console.log('开始创建剪贴板图片胶囊');
+    
+    // 立即返回loading状态的胶囊
+    const loadingCapsule = {
+      type: 'image',
+      content: content, // 保存完整的剪贴板标识
+      displayText: '剪贴板图片',
+      icon: null, // 无图标，显示骨架屏
+      iconType: 'loading',
+      fileName: '剪贴板图片',
+      fileExt: 'png',
+      filePath: null, // 剪贴板图片没有文件路径
+      isClipboardImage: true,
+      isLoading: true
+    };
+    
+    // 异步处理图片加载
+    this.processClipboardImageAsync(content, loadingCapsule);
+    
+    return loadingCapsule;
+  }
+
+  // 异步处理剪贴板图片
+  async processClipboardImageAsync(content, capsuleData) {
+    try {
+      // 提取base64数据
+      const dataUrl = content.replace('[CLIPBOARD-IMAGE]', '');
+      
+      // 检查数据大小（估算）
+      const sizeEstimate = dataUrl.length * 0.75; // base64大约是原数据的1.33倍
+      const maxSize = 2 * 1024 * 1024; // 2MB
+      
+      if (sizeEstimate > maxSize) {
+        console.warn('剪贴板图片过大，已丢弃:', { size: sizeEstimate, maxSize });
+        this.updateCapsuleToError(capsuleData, '图片过大');
+        return;
+      }
+      
+      // 生成缩略图
+      const thumbnailData = await this.generateThumbnailFromDataUrl(dataUrl);
+      
+      // 更新胶囊数据
+      capsuleData.icon = thumbnailData || '🖼️';
+      capsuleData.iconType = thumbnailData ? 'thumbnail' : 'emoji';
+      capsuleData.isLoading = false;
+      capsuleData.originalDataUrl = dataUrl;
+      
+      // 如果当前正在显示这个胶囊，更新UI
+      if (this.capsuleData === capsuleData) {
+        this.updateCapsuleDisplay(capsuleData);
+      }
+      
+      console.log('剪贴板图片胶囊加载完成');
+    } catch (error) {
+      console.error('剪贴板图片胶囊处理失败:', error);
+      this.updateCapsuleToError(capsuleData, '处理失败');
+    }
+  }
+
+  // 从DataURL生成缩略图
+  async generateThumbnailFromDataUrl(dataUrl) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      
+      // 设置超时
+      const timeout = setTimeout(() => {
+        console.warn('剪贴板图片加载超时');
+        resolve(null);
+      }, 5000);
+      
+      img.onload = () => {
+        clearTimeout(timeout);
+        try {
+          // 创建canvas生成缩略图
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          
+          // 缩略图尺寸（正方形）
+          const size = 32;
+          canvas.width = size;
+          canvas.height = size;
+          
+          // 计算缩放和裁剪参数（保持纵横比，居中裁剪）
+          const scale = Math.max(size / img.width, size / img.height);
+          const scaledWidth = img.width * scale;
+          const scaledHeight = img.height * scale;
+          const offsetX = (size - scaledWidth) / 2;
+          const offsetY = (size - scaledHeight) / 2;
+          
+          // 绘制缩略图
+          ctx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
+          
+          // 转换为base64
+          const thumbnailData = canvas.toDataURL('image/jpeg', 0.8);
+          console.log('剪贴板图片缩略图生成成功');
+          resolve(thumbnailData);
+        } catch (error) {
+          console.error('剪贴板图片缩略图生成失败:', error);
+          resolve(null);
+        }
+      };
+      
+      img.onerror = () => {
+        clearTimeout(timeout);
+        console.error('剪贴板图片加载失败');
+        resolve(null);
+      };
+      
+      // 加载图片
+      img.src = dataUrl;
+    });
+  }
+
   // 显示胶囊
   showCapsule(capsuleData) {
     if (!this.contentCapsule || !capsuleData) return;
@@ -1393,7 +1692,20 @@ class MiniToolboxRenderer {
     
     if (this.capsuleIcon) {
       // 根据图标类型设置显示
-      if (capsuleData.iconType === 'native' && capsuleData.icon.startsWith('data:')) {
+      if (capsuleData.iconType === 'loading') {
+        // 显示骨架屏
+        this.capsuleIcon.innerHTML = '<div class="image-skeleton"></div>';
+      } else if (capsuleData.iconType === 'thumbnail' && capsuleData.icon && capsuleData.icon.startsWith('data:')) {
+        // 图片缩略图
+        this.capsuleIcon.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = capsuleData.icon;
+        img.style.width = '32px';
+        img.style.height = '32px';
+        img.style.objectFit = 'cover';
+        img.style.borderRadius = '4px';
+        this.capsuleIcon.appendChild(img);
+      } else if (capsuleData.iconType === 'native' && capsuleData.icon && capsuleData.icon.startsWith('data:')) {
         // 系统图标（base64图片）
         this.capsuleIcon.innerHTML = '';
         const img = document.createElement('img');
@@ -1404,14 +1716,16 @@ class MiniToolboxRenderer {
         this.capsuleIcon.appendChild(img);
       } else {
         // Emoji图标
-        this.capsuleIcon.textContent = capsuleData.icon;
+        this.capsuleIcon.textContent = capsuleData.icon || '📄';
         this.capsuleIcon.innerHTML = this.capsuleIcon.textContent; // 清除可能的img元素
       }
     }
 
     // 根据胶囊类型添加CSS类
-    this.contentCapsule.classList.remove('file-capsule', 'text-capsule');
-    if (capsuleData.type === 'file') {
+    this.contentCapsule.classList.remove('file-capsule', 'text-capsule', 'image-capsule');
+    if (capsuleData.type === 'image') {
+      this.contentCapsule.classList.add('image-capsule');
+    } else if (capsuleData.type === 'file') {
       this.contentCapsule.classList.add('file-capsule');
     } else {
       this.contentCapsule.classList.add('text-capsule');
@@ -1447,7 +1761,7 @@ class MiniToolboxRenderer {
     this.contentCapsule.style.display = 'none';
     
     // 清除胶囊类型样式
-    this.contentCapsule.classList.remove('file-capsule', 'text-capsule');
+    this.contentCapsule.classList.remove('file-capsule', 'text-capsule', 'image-capsule');
 
     // 移除输入框胶囊模式
     if (this.inputDisplay) {
