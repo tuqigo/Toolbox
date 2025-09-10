@@ -1236,7 +1236,7 @@ class MiniToolbox {
           }
         }
 
-        // 检查是否有图片数据
+        // 检查是否有图片数据（图片优先级高于文件路径）
         const image = clipboard.readImage();
         if (!image.isEmpty()) {
           // 有图片数据，生成临时文件路径标识
@@ -1244,6 +1244,7 @@ class MiniToolbox {
           if (imageDataUrl && imageDataUrl !== 'data:image/png;base64,') {
             // 创建一个特殊的标识，表示这是剪贴板图片数据
             currentContent = `[CLIPBOARD-IMAGE]${imageDataUrl}`;
+            currentFileContent = ''; // 图片数据优先，清除文件路径
           }
         }
       } catch (error) {

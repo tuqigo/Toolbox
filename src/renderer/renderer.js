@@ -1510,56 +1510,9 @@ class MiniToolboxRenderer {
 
   // 生成缩略图
   async generateThumbnail(filePath) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      
-      // 设置超时
-      const timeout = setTimeout(() => {
-        console.warn('图片加载超时:', filePath);
-        resolve(null);
-      }, 5000);
-      
-      img.onload = () => {
-        clearTimeout(timeout);
-        try {
-          // 创建canvas生成缩略图
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          
-          // 缩略图尺寸（正方形）
-          const size = 32;
-          canvas.width = size;
-          canvas.height = size;
-          
-          // 计算缩放和裁剪参数（保持纵横比，居中裁剪）
-          const scale = Math.max(size / img.width, size / img.height);
-          const scaledWidth = img.width * scale;
-          const scaledHeight = img.height * scale;
-          const offsetX = (size - scaledWidth) / 2;
-          const offsetY = (size - scaledHeight) / 2;
-          
-          // 绘制缩略图
-          ctx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
-          
-          // 转换为base64
-          const thumbnailData = canvas.toDataURL('image/jpeg', 0.8);
-          console.log('缩略图生成成功:', filePath);
-          resolve(thumbnailData);
-        } catch (error) {
-          console.error('缩略图生成失败:', error);
-          resolve(null);
-        }
-      };
-      
-      img.onerror = () => {
-        clearTimeout(timeout);
-        console.error('图片加载失败:', filePath);
-        resolve(null);
-      };
-      
-      // 加载图片
-      img.src = `file://${filePath.replace(/\\/g, '/')}`;
-    });
+    const imageSrc = `file://${filePath.replace(/\\/g, '/')}`;
+    const logPrefix = filePath;
+    return this.generateThumbnailFromSrc(imageSrc, logPrefix);
   }
 
   // 创建剪贴板图片胶囊
@@ -1625,12 +1578,17 @@ class MiniToolboxRenderer {
 
   // 从DataURL生成缩略图
   async generateThumbnailFromDataUrl(dataUrl) {
+    return this.generateThumbnailFromSrc(dataUrl, '剪贴板图片');
+  }
+
+  // 通用缩略图生成方法
+  async generateThumbnailFromSrc(imageSrc, logPrefix) {
     return new Promise((resolve) => {
       const img = new Image();
       
       // 设置超时
       const timeout = setTimeout(() => {
-        console.warn('剪贴板图片加载超时');
+        console.warn('图片加载超时:', logPrefix);
         resolve(null);
       }, 5000);
       
@@ -1658,22 +1616,22 @@ class MiniToolboxRenderer {
           
           // 转换为base64
           const thumbnailData = canvas.toDataURL('image/jpeg', 0.8);
-          console.log('剪贴板图片缩略图生成成功');
+          console.log('缩略图生成成功:', logPrefix);
           resolve(thumbnailData);
         } catch (error) {
-          console.error('剪贴板图片缩略图生成失败:', error);
+          console.error('缩略图生成失败:', logPrefix, error);
           resolve(null);
         }
       };
       
       img.onerror = () => {
         clearTimeout(timeout);
-        console.error('剪贴板图片加载失败');
+        console.error('图片加载失败:', logPrefix);
         resolve(null);
       };
       
       // 加载图片
-      img.src = dataUrl;
+      img.src = imageSrc;
     });
   }
 
