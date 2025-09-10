@@ -1,9 +1,8 @@
 // 示例：书签搜索（search 模式）
 const fs = require('fs');
+const { shell } = require('electron');
 const path = require('path');
-const { clipboard } = (() => {
-  try { return require('electron'); } catch { return { clipboard: { writeText: () => {} } }; }
-})();
+
 
 // 缓存，避免每次都扫磁盘
 let bookmarksCache = { items: [], ts: 0 };
@@ -87,7 +86,7 @@ async function loadBookmarksIfNeeded(force = false) {
       if (!json) continue;
       collected = collected.concat(collectFromChromiumJson(json));
     }
-  } catch {}
+  } catch { }
   // TODO: Firefox 支持（places.sqlite）需要引入 sqlite 读取，这里暂不实现
   const items = dedup(collected);
   bookmarksCache = { items, ts: now };
@@ -112,8 +111,16 @@ module.exports = {
       const items = searchIn(base, query);
       setList(items.length > 0 ? items : [{ title: '无结果', description: '换个关键词试试', canClick: false }]);
     },
-    handleSelect: async (_action, itemData) => {
-      try { clipboard.writeText(String(itemData && (itemData.url || itemData.description) || '')); } catch {}
+    handleSelect: async (_action, itemData, callbackSetList) => {
+      try {
+        await shell.openExternal(itemData.url);
+      } catch (error) {
+        callbackSetList([{
+          title: '打开链接失败',
+          description: error.message,
+          data: null
+        }]);
+      }
     }
   }
 };
