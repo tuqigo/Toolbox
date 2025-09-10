@@ -16,6 +16,11 @@ class IconManager {
       return this.getDefaultIcon('unknown');
     }
 
+    // 检查是否为文件夹 - 直接使用默认图标
+    if (await this.isDirectory(filePath)) {
+      return this.getDefaultIcon('folder');
+    }
+
     const ext = this.getFileExtension(filePath);
     const cacheKey = ext || 'no-ext';
 
@@ -43,7 +48,8 @@ class IconManager {
     } catch (error) {
       console.error('获取系统图标失败:', error);
       // 返回默认图标
-      const defaultIcon = this.getDefaultIcon(this.detectFileCategory(ext));
+      const category = ext === 'lnk' ? 'shortcut' : this.detectFileCategory(ext);
+      const defaultIcon = this.getDefaultIcon(category);
       this.setCachedIcon(cacheKey, defaultIcon);
       return defaultIcon;
     } finally {
@@ -71,19 +77,19 @@ class IconManager {
   // Windows图标获取
   async getWindowsIcon(filePath, ext) {
     try {
-      // 方法1: 尝试直接获取文件图标
+      // 直接尝试获取文件图标（包括.lnk文件）
       if (await this.fileExists(filePath)) {
         const icon = await app.getFileIcon(filePath, { size: 'normal' });
         if (icon && !icon.isEmpty()) {
           return {
             type: 'native',
             data: icon.toDataURL(),
-            size: { width: 32, height: 32 }
+            size: { width: 36, height: 36 }
           };
         }
       }
 
-      // 方法2: 通过创建临时文件获取扩展名图标
+      // 通过创建临时文件获取扩展名图标
       if (ext) {
         const tempFileName = `temp_icon_file.${ext}`;
         const tempPath = path.join(app.getPath('temp'), tempFileName);
@@ -157,6 +163,16 @@ class IconManager {
     }
   }
 
+  // 检查是否为目录
+  async isDirectory(filePath) {
+    try {
+      const stats = await fs.stat(filePath);
+      return stats.isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
   // 获取默认图标（Unicode Emoji）
   getDefaultIcon(category) {
     const defaultIcons = {
@@ -171,7 +187,9 @@ class IconManager {
       data: '📋',
       executable: '⚙️',
       font: '🔤',
-      unknown: '📁'
+      folder: '📁',
+      shortcut: '🔗',
+      unknown: '📄'
     };
 
     const icon = defaultIcons[category] || defaultIcons.unknown;
@@ -216,6 +234,9 @@ class IconManager {
   }
 
   detectFileCategory(ext) {
+    // 特殊文件类型
+    if (ext === 'lnk') return 'shortcut';
+    
     const fileTypes = {
       document: ['doc', 'docx', 'pdf', 'txt', 'rtf', 'odt', 'pages'],
       spreadsheet: ['xls', 'xlsx', 'csv', 'ods', 'numbers'],
