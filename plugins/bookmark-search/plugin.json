@@ -13,7 +13,7 @@
       "placeholder": "输入关键字搜索书签...",
       "cmds": [
         { "type": "keyword", "value": "书签" },
-        { "type": "keyword", "value": "bookmark" }
+        { "type": "keyword", "value": "bk" }
       ]
     }
   ]
