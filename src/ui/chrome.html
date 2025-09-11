@@ -35,6 +35,7 @@
       function qs(k){ return new URLSearchParams(location.search).get(k) }
       const id = qs('id');
       const name = qs('name') || id;
+      const instanceId = qs('instanceId') || 'default';
       const icon = qs('icon') || '🔧';
       document.getElementById('title').textContent = name;
       document.getElementById('icon').textContent = icon;
@@ -45,10 +46,10 @@
         pinned = !!v; if (pinned) pinEl.classList.add('active'); else pinEl.classList.remove('active');
       }
       function safe(fn){ try { fn(); } catch(e) { console && console.warn && console.warn('[mt.chrome]', e); } }
-      pinEl.addEventListener('click', ()=> safe(()=>{ setPinned(!pinned); window.MTChrome && window.MTChrome.pin && window.MTChrome.pin(id, pinned); }));
-      document.getElementById('tnMin').addEventListener('click', ()=> safe(()=>{ window.MTChrome.win(id, 'minimize'); }));
-      document.getElementById('tnMax').addEventListener('click', ()=> safe(()=>{ window.MTChrome.win(id, 'toggle-maximize'); }));
-      document.getElementById('tnClose').addEventListener('click', ()=> safe(()=>{ window.MTChrome.win(id, 'close'); }));
+      pinEl.addEventListener('click', ()=> safe(()=>{ setPinned(!pinned); window.MTChrome && window.MTChrome.pin && window.MTChrome.pin(id, instanceId, pinned); }));
+      document.getElementById('tnMin').addEventListener('click', ()=> safe(()=>{ window.MTChrome.win(id, instanceId, 'minimize'); }));
+      document.getElementById('tnMax').addEventListener('click', ()=> safe(()=>{ window.MTChrome.win(id, instanceId, 'toggle-maximize'); }));
+      document.getElementById('tnClose').addEventListener('click', ()=> safe(()=>{ window.MTChrome.win(id, instanceId, 'close'); }));
 
       // 主题响应：调整顶栏基色
       function applyTheme(payload){

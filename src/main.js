@@ -550,7 +550,7 @@ class MiniToolbox {
         // 使用内容视图的 webContents 发送数据（避免发送到顶栏）
         setTimeout(() => {
           try {
-            const targetWc = this.windowManager.getContentWebContents(plugin.id) || (pluginWindow && pluginWindow.webContents);
+            const targetWc = this.windowManager.getContentWebContentsForWindow(pluginWindow) || this.windowManager.getContentWebContents(plugin.id) || (pluginWindow && pluginWindow.webContents);
             if (targetWc && !targetWc.isDestroyed()) {
               const safeInputData = {
                 content: inputData.content,
@@ -762,7 +762,9 @@ class MiniToolbox {
   async createPluginWindow(plugin) { 
     // 获取主输入框所在的屏幕
     const mainWindowScreen = this.getMainWindowScreen();
-    return this.windowManager.createForPlugin(plugin, mainWindowScreen); 
+    const created = await this.windowManager.createForPlugin(plugin, mainWindowScreen);
+    // 兼容旧调用方：既支持返回 win，也支持返回对象
+    return created && created.win ? created.win : created; 
   }
 
   // 获取主输入框所在的屏幕
@@ -827,7 +829,7 @@ class MiniToolbox {
     };
 
     // 安全调用网关
-    ipcMain.handle('mt.secure-call', async (event, { pluginId, channel, payload } = {}) => {
+    ipcMain.handle('mt.secure-call', async (event, { pluginId, instanceId, channel, payload } = {}) => {
       const pid = pluginId || getPluginIdFromEvent(event);
       const meta = pid && this.pluginManager.get(pid);
       
@@ -871,7 +873,8 @@ class MiniToolbox {
               name: p.name,
               description: p.description,
               icon: p.icon,
-              ui: !!p.ui
+              ui: !!p.ui,
+              instanceMode: p.instanceMode || 'single'
             }));
             return { ok: true, data: list };
           }
@@ -882,7 +885,8 @@ class MiniToolbox {
               name: p.name,
               description: p.description,
               icon: p.icon,
-              ui: !!p.ui
+              ui: !!p.ui,
+              instanceMode: p.instanceMode || 'single'
             }));
             return { ok: true, data: list };
           }
@@ -1032,10 +1036,10 @@ class MiniToolbox {
     });
 
     // 插件窗口钉住控制
-    ipcMain.on('mt.plugin.pin', (_e, { pluginId, pinned } = {}) => {
+    ipcMain.on('mt.plugin.pin', (_e, { pluginId, instanceId, pinned } = {}) => {
       try {
         if (!pluginId) return;
-        const win = this.windowManager.getWindow(pluginId);
+        const win = this.windowManager.getWindow(pluginId, instanceId);
         if (win && !win.isDestroyed()) {
           win.__mtPinned = !!pinned;
           try { win.setAlwaysOnTop(!!pinned, 'screen-saver'); } catch {}
@@ -1044,9 +1048,9 @@ class MiniToolbox {
     });
 
     // 插件窗口 DevTools 控制
-    ipcMain.on('mt.plugin.devtools', (_e, { pluginId, open, toggle } = {}) => {
+    ipcMain.on('mt.plugin.devtools', (_e, { pluginId, instanceId, open, toggle } = {}) => {
       try {
-        const win = this.windowManager.getWindow(pluginId);
+        const win = this.windowManager.getWindow(pluginId, instanceId);
         if (!win || win.isDestroyed()) return;
         const wc = win.webContents;
         if (toggle) {
@@ -1058,10 +1062,10 @@ class MiniToolbox {
     });
 
     // 插件窗口标准控制（用于自定义美化后的按钮）
-    ipcMain.on('mt.plugin.win', (_e, { pluginId, action } = {}) => {
+    ipcMain.on('mt.plugin.win', (_e, { pluginId, instanceId, action } = {}) => {
       try {
         if (!pluginId) return;
-        const win = this.windowManager.getWindow(pluginId);
+        const win = this.windowManager.getWindow(pluginId, instanceId);
         if (!win || win.isDestroyed()) return;
         switch (action) {
           case 'minimize':
@@ -1080,7 +1084,7 @@ class MiniToolbox {
             // 动态设置顶栏高度：action 形如 set-chrome-height:64
             if (String(action||'').startsWith('set-chrome-height:')) {
               const h = parseInt(String(action).split(':')[1], 10);
-              try { this.windowManager.setChromeHeight(pluginId, h); } catch {}
+              try { this.windowManager.setChromeHeight(pluginId, h, instanceId); } catch {}
             }
         }
       } catch {}

@@ -5,28 +5,56 @@ const { BrowserWindow } = require('electron');
 class WindowManager {
   constructor(options = {}) {
     this.isQuiet = !!options.isQuiet;
-    this.windows = new Map(); // pluginId -> BrowserWindow
+    // 统一改为按实例键存储；单例时实例键即为 pluginId
+    this.windows = new Map(); // key -> BrowserWindow
+    this.pluginIdToInstanceKeys = new Map(); // pluginId -> Set(key)
     this.webContentsToPluginId = new Map(); // wc.id -> pluginId
-    this.contentViews = new Map(); // pluginId -> BrowserView (content)
-    this.chromeViews = new Map(); // pluginId -> BrowserView (titlebar)
-    this.chromeHeights = new Map(); // pluginId -> number
+    this.webContentsToInstanceKey = new Map(); // wc.id -> key
+    this.contentViews = new Map(); // key -> BrowserView (content)
+    this.chromeViews = new Map(); // key -> BrowserView (titlebar)
+    this.chromeHeights = new Map(); // key -> number
     this.defaultChromeHeight = Math.max(32, Math.min(96, Number(options.titlebarHeight || 48)));
     this.defaultTheme = (options.defaultTheme || 'system'); // 'system' | 'light' | 'dark'
+    this.instanceCounters = new Map(); // pluginId -> number
+  }
+
+  generateInstanceId(pluginId) {
+    const next = (this.instanceCounters.get(pluginId) || 0) + 1;
+    this.instanceCounters.set(pluginId, next);
+    return `${Date.now().toString(36)}-${next}`;
+  }
+
+  getAnyInstanceKey(pluginId) {
+    const set = this.pluginIdToInstanceKeys.get(pluginId);
+    if (!set || set.size === 0) return null;
+    for (const k of set.values()) return k;
+    return null;
   }
 
   async createForPlugin(pluginMeta, targetScreen = null) {
-    if (this.windows.has(pluginMeta.id)) {
-      const win = this.windows.get(pluginMeta.id);
-      if (!win.isDestroyed()) {
-        // 如果指定了目标屏幕，将窗口移动到该屏幕
-        if (targetScreen) {
-          this.centerWindowOnScreen(win, targetScreen);
+    const isMulti = String(pluginMeta.instanceMode || 'single') === 'multi';
+    let instanceId = null;
+    let key = null;
+    // 单例复用
+    if (!isMulti) {
+      const existingKey = this.getAnyInstanceKey(pluginMeta.id) || pluginMeta.id;
+      if (this.windows.has(existingKey)) {
+        const win = this.windows.get(existingKey);
+        if (win && !win.isDestroyed()) {
+          if (targetScreen) {
+            this.centerWindowOnScreen(win, targetScreen);
+          }
+          win.show();
+          win.focus();
+          return win;
         }
-        win.show();
-        win.focus();
-        return win;
+        this.windows.delete(existingKey);
       }
-      this.windows.delete(pluginMeta.id);
+      instanceId = 'default';
+      key = pluginMeta.id; // 单例直接使用插件ID作为键
+    } else {
+      instanceId = this.generateInstanceId(pluginMeta.id);
+      key = `${pluginMeta.id}#${instanceId}`;
     }
 
     const cfg = pluginMeta.window || {};
@@ -60,10 +88,26 @@ class WindowManager {
       windowOptions.y = y;
     }
 
+    // 注入实例参数
+    if (Array.isArray(windowOptions.webPreferences.additionalArguments)) {
+      if (!windowOptions.webPreferences.additionalArguments.find(s => String(s||'').startsWith('--mt-instance-id='))) {
+        windowOptions.webPreferences.additionalArguments.push(`--mt-instance-id=${instanceId}`);
+      }
+    }
+
     const win = new BrowserWindow(windowOptions);
+    // 标记实例信息
+    try {
+      win.__mtPluginId = pluginMeta.id;
+      win.__mtInstanceId = instanceId;
+      win.__mtInstanceKey = key;
+    } catch {}
 
     // 先登记映射（主窗口可选）
-    try { this.webContentsToPluginId.set(win.webContents.id, pluginMeta.id); } catch {}
+    try {
+      this.webContentsToPluginId.set(win.webContents.id, pluginMeta.id);
+      this.webContentsToInstanceKey.set(win.webContents.id, key);
+    } catch {}
     await win.loadURL('about:blank');
 
     // 叠加顶栏 + 内容 BrowserView，不侵入插件 DOM，且不遮挡内容
@@ -79,14 +123,15 @@ class WindowManager {
           webSecurity: true,
           preload: path.join(__dirname, '../preload/plugin-preload.js'),
           additionalArguments: [
-            `--mt-plugin-id=${pluginMeta.id}`
+            `--mt-plugin-id=${pluginMeta.id}`,
+            `--mt-instance-id=${instanceId}`
           ]
         }
       });
       const setContentBounds = () => {
         try {
           const [w, h] = win.getContentSize();
-          const ch = this.chromeHeights.get(pluginMeta.id) || this.defaultChromeHeight;
+          const ch = this.chromeHeights.get(key) || this.defaultChromeHeight;
           contentView.setBounds({ x: 0, y: ch, width: Math.max(0, w), height: Math.max(0, h - ch) });
           contentView.setAutoResize({ width: true, height: true });
         } catch {}
@@ -94,7 +139,10 @@ class WindowManager {
       win.addBrowserView(contentView);
       setContentBounds();
       win.on('resize', setContentBounds);
-      try { this.webContentsToPluginId.set(contentView.webContents.id, pluginMeta.id); } catch {}
+      try {
+        this.webContentsToPluginId.set(contentView.webContents.id, pluginMeta.id);
+        this.webContentsToInstanceKey.set(contentView.webContents.id, key);
+      } catch {}
       const htmlPath = path.join(pluginMeta.path, pluginMeta.main || 'index.html');
       await contentView.webContents.loadFile(htmlPath);
 
@@ -111,7 +159,7 @@ class WindowManager {
       const setViewBounds = () => {
         try {
           const [w] = win.getContentSize();
-          const ch = this.chromeHeights.get(pluginMeta.id) || this.defaultChromeHeight;
+          const ch = this.chromeHeights.get(key) || this.defaultChromeHeight;
           view.setBounds({ x: 0, y: 0, width: Math.max(0, w), height: ch });
           view.setAutoResize({ width: true });
         } catch {}
@@ -121,15 +169,17 @@ class WindowManager {
       win.on('resize', setViewBounds);
       const url = new URL('file://' + path.join(__dirname, '../ui/chrome.html'));
       url.searchParams.set('id', pluginMeta.id);
+      url.searchParams.set('instanceId', instanceId);
       url.searchParams.set('name', pluginMeta.name || pluginMeta.id);
       url.searchParams.set('icon', pluginMeta.icon || '🔧');
       url.searchParams.set('theme', this.defaultTheme);
       await view.webContents.loadURL(url.toString());
       // 存储引用
       win.__mtChromeView = view;
-      this.contentViews.set(pluginMeta.id, contentView);
-      this.chromeViews.set(pluginMeta.id, view);
-      this.chromeHeights.set(pluginMeta.id, this.defaultChromeHeight);
+      this.contentViews.set(key, contentView);
+      this.chromeViews.set(key, view);
+      this.chromeHeights.set(key, this.defaultChromeHeight);
+      try { this.webContentsToInstanceKey.set(view.webContents.id, key); } catch {}
     } catch {}
 
     try {
@@ -141,11 +191,16 @@ class WindowManager {
     // 置入钉住状态标记
     win.__mtPinned = false;
     win.on('closed', () => {
-      this.windows.delete(pluginMeta.id);
+      try { this.windows.delete(key); } catch {}
+      try {
+        const set = this.pluginIdToInstanceKeys.get(pluginMeta.id);
+        if (set) { set.delete(key); if (set.size === 0) this.pluginIdToInstanceKeys.delete(pluginMeta.id); }
+      } catch {}
       try { this.webContentsToPluginId.delete(win.webContents.id); } catch {}
-      try { const cv = this.contentViews.get(pluginMeta.id); if (cv) this.webContentsToPluginId.delete(cv.webContents.id); } catch {}
-      try { this.contentViews.delete(pluginMeta.id); } catch {}
-      try { this.chromeViews.delete(pluginMeta.id); } catch {}
+      try { this.webContentsToInstanceKey.delete(win.webContents.id); } catch {}
+      try { const cv = this.contentViews.get(key); if (cv) { this.webContentsToPluginId.delete(cv.webContents.id); this.webContentsToInstanceKey.delete(cv.webContents.id); } } catch {}
+      try { this.contentViews.delete(key); } catch {}
+      try { this.chromeViews.delete(key); } catch {}
     });
     // 失去焦点时自动隐藏（被钉住则不隐藏）
     win.on('blur', () => {
@@ -153,13 +208,24 @@ class WindowManager {
         if (!win.isDestroyed() && !win.__mtPinned) win.hide();
       } catch {}
     });
-    this.windows.set(pluginMeta.id, win);
+    this.windows.set(key, win);
+    // 反向索引
+    if (!this.pluginIdToInstanceKeys.has(pluginMeta.id)) this.pluginIdToInstanceKeys.set(pluginMeta.id, new Set());
+    this.pluginIdToInstanceKeys.get(pluginMeta.id).add(key);
     win.show();
     return win;
   }
 
-  getWindow(pluginId) {
-    try { return this.windows.get(pluginId) || null; } catch { return null; }
+  getWindow(pluginId, instanceId = null) {
+    try {
+      if (instanceId && instanceId !== 'default') {
+        const key = `${pluginId}#${instanceId}`;
+        return this.windows.get(key) || null;
+      }
+      // 单例或未指定实例时，返回任一实例
+      const anyKey = this.getAnyInstanceKey(pluginId) || pluginId;
+      return this.windows.get(anyKey) || null;
+    } catch { return null; }
   }
 
   getPluginIdForWebContents(wc) {
@@ -171,27 +237,67 @@ class WindowManager {
     }
   }
 
-  getContentWebContents(pluginId) {
+  getInstanceKeyForWebContents(wc) {
     try {
-      const v = this.contentViews.get(pluginId);
-      return v && v.webContents || null;
-    } catch {
-      return null;
-    }
+      const id = wc && wc.id;
+      return this.webContentsToInstanceKey.get(id) || null;
+    } catch { return null; }
   }
 
-  setChromeHeight(pluginId, height) {
+  getContentWebContentsForWindow(win) {
+    try {
+      const key = win && win.__mtInstanceKey;
+      if (!key) return null;
+      const v = this.contentViews.get(key);
+      return v && v.webContents || null;
+    } catch { return null; }
+  }
+
+  getContentWebContents(pluginId, instanceId = null) {
+    try {
+      if (instanceId && instanceId !== 'default') {
+        const key = `${pluginId}#${instanceId}`;
+        const v = this.contentViews.get(key);
+        return v && v.webContents || null;
+      }
+      // 任一实例
+      const anyKey = this.getAnyInstanceKey(pluginId) || pluginId;
+      const v = this.contentViews.get(anyKey);
+      return v && v.webContents || null;
+    } catch { return null; }
+  }
+
+  setChromeHeight(pluginId, height, instanceId = null) {
     try {
       const h = Math.max(32, Math.min(96, Math.floor(height || 48)));
-      this.chromeHeights.set(pluginId, h);
-      const win = this.getWindow(pluginId);
-      const chrome = this.chromeViews.get(pluginId);
-      const content = this.contentViews.get(pluginId);
-      if (win && !win.isDestroyed() && chrome) {
-        const [w, totalH] = win.getContentSize();
-        try { chrome.setBounds({ x: 0, y: 0, width: Math.max(0, w), height: h }); } catch {}
-        if (content) {
-          try { content.setBounds({ x: 0, y: h, width: Math.max(0, w), height: Math.max(0, totalH - h) }); } catch {}
+      if (instanceId && instanceId !== 'default') {
+        const key = `${pluginId}#${instanceId}`;
+        this.chromeHeights.set(key, h);
+        const win = this.windows.get(key);
+        const chrome = this.chromeViews.get(key);
+        const content = this.contentViews.get(key);
+        if (win && !win.isDestroyed() && chrome) {
+          const [w, totalH] = win.getContentSize();
+          try { chrome.setBounds({ x: 0, y: 0, width: Math.max(0, w), height: h }); } catch {}
+          if (content) {
+            try { content.setBounds({ x: 0, y: h, width: Math.max(0, w), height: Math.max(0, totalH - h) }); } catch {}
+          }
+        }
+        return;
+      }
+      // 未指定实例：应用到该插件的所有实例（或单例）
+      const keys = this.pluginIdToInstanceKeys.get(pluginId) || new Set([pluginId]);
+      for (const key of keys) {
+        this.chromeHeights.set(key, h);
+        const win = this.windows.get(key);
+        const chrome = this.chromeViews.get(key);
+        const content = this.contentViews.get(key);
+        if (win && !win.isDestroyed() && chrome) {
+          const [w, totalH] = win.getContentSize();
+          try { chrome.setBounds({ x: 0, y: 0, width: Math.max(0, w), height: h }); } catch {}
+          if (content) {
+            try { content.setBounds({ x: 0, y: h, width: Math.max(0, w), height: Math.max(0, totalH - h) }); } catch {}
+          }
         }
       }
     } catch {}
@@ -202,10 +308,11 @@ class WindowManager {
       const h = Math.max(32, Math.min(96, Math.floor(Number(height) || 48)));
       this.defaultChromeHeight = h;
       // 实时应用到已打开窗口（未被单独设置过的）
-      for (const [pluginId, win] of this.windows.entries()) {
+      for (const [key, win] of this.windows.entries()) {
         if (!win || win.isDestroyed()) continue;
-        if (!this.chromeHeights.has(pluginId)) this.chromeHeights.set(pluginId, h);
-        this.setChromeHeight(pluginId, this.chromeHeights.get(pluginId));
+        if (!this.chromeHeights.has(key)) this.chromeHeights.set(key, h);
+        const [pluginId, instanceId] = String(key).includes('#') ? String(key).split('#') : [key, 'default'];
+        this.setChromeHeight(pluginId, this.chromeHeights.get(key), instanceId);
       }
     } catch {}
   }

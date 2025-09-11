@@ -1,8 +1,11 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// 从命令行参数读取插件ID
-const pluginIdArg = (process && process.argv || []).find(a => String(a||'').startsWith('--mt-plugin-id='));
+// 从命令行参数读取插件ID与实例ID
+const argv = (process && process.argv) || [];
+const pluginIdArg = argv.find(a => String(a||'').startsWith('--mt-plugin-id='));
 const pluginId = pluginIdArg ? pluginIdArg.split('=')[1] : null;
+const instanceIdArg = argv.find(a => String(a||'').startsWith('--mt-instance-id='));
+const instanceId = instanceIdArg ? instanceIdArg.split('=')[1] : 'default';
 
 // 兼容 API：权限改为统一控制，此接口返回空数组（不再基于 manifest）
 function getPermissions() {
@@ -10,7 +13,7 @@ function getPermissions() {
 }
 
 async function secureInvoke(channel, payload) {
-  const res = await ipcRenderer.invoke('mt.secure-call', { pluginId, channel, payload });
+  const res = await ipcRenderer.invoke('mt.secure-call', { pluginId, instanceId, channel, payload });
   // 统一解包：成功返回 data（或 true），失败抛错，便于插件直接使用
   if (res && res.ok) return (typeof res.data === 'undefined') ? true : res.data;
   const msg = (res && res.error) || 'Unknown error';
@@ -26,18 +29,18 @@ const api = {
   invoke: secureInvoke,
   // 窗口控制
   window: {
-    pin: (pinned = true) => ipcRenderer.send('mt.plugin.pin', { pluginId, pinned: !!pinned }),
+    pin: (pinned = true) => ipcRenderer.send('mt.plugin.pin', { pluginId, instanceId, pinned: !!pinned }),
     // 标准窗口按钮：最小化/最大化/关闭
     controls: {
-      minimize: () => ipcRenderer.send('mt.plugin.win', { pluginId, action: 'minimize' }),
-      maximize: () => ipcRenderer.send('mt.plugin.win', { pluginId, action: 'maximize' }),
-      close: () => ipcRenderer.send('mt.plugin.win', { pluginId, action: 'close' }),
-      toggleMaximize: () => ipcRenderer.send('mt.plugin.win', { pluginId, action: 'toggle-maximize' })
+      minimize: () => ipcRenderer.send('mt.plugin.win', { pluginId, instanceId, action: 'minimize' }),
+      maximize: () => ipcRenderer.send('mt.plugin.win', { pluginId, instanceId, action: 'maximize' }),
+      close: () => ipcRenderer.send('mt.plugin.win', { pluginId, instanceId, action: 'close' }),
+      toggleMaximize: () => ipcRenderer.send('mt.plugin.win', { pluginId, instanceId, action: 'toggle-maximize' })
     },
     devtools: {
-      open: () => ipcRenderer.send('mt.plugin.devtools', { pluginId, open: true }),
-      close: () => ipcRenderer.send('mt.plugin.devtools', { pluginId, open: false }),
-      toggle: () => ipcRenderer.send('mt.plugin.devtools', { pluginId, toggle: true })
+      open: () => ipcRenderer.send('mt.plugin.devtools', { pluginId, instanceId, open: true }),
+      close: () => ipcRenderer.send('mt.plugin.devtools', { pluginId, instanceId, open: false }),
+      toggle: () => ipcRenderer.send('mt.plugin.devtools', { pluginId, instanceId, toggle: true })
     }
   },
   // 友好封装：API 即权限（由主进程实现与限制）

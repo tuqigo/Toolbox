@@ -95,6 +95,16 @@ class PluginManager {
       path: pluginPath,
       icon: manifest.logo || '🔧',
       window: windowCfg,
+      // 单例/多实例：默认单例
+      instanceMode: (function(){
+        try {
+          if (typeof manifest.instance === 'string') {
+            return (manifest.instance.toLowerCase() === 'multi') ? 'multi' : 'single';
+          }
+          if (manifest.multiInstance === true) return 'multi';
+        } catch {}
+        return 'single';
+      })(),
       ui,
       main: ui ? 'index.html' : null,
       version: manifest.version || '1.0.0',
