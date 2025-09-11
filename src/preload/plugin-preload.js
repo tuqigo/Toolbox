@@ -57,7 +57,19 @@ const api = {
     copy: (text) => secureInvoke('clip.copy', String(text || ''))
   },
   // 工具（预留占位，无权限查询接口）
-  utils: {}
+  utils: {},
+  // SQLite KV & 统计
+  db: {
+    put: (p) => secureInvoke('db.put', p || {}),
+    get: (p) => secureInvoke('db.get', p || {}),
+    del: (p) => secureInvoke('db.del', p || {}),
+    list: (p) => secureInvoke('db.list', p || {}),
+    count: (p) => secureInvoke('db.count', p || {})
+  },
+  stats: {
+    inc: (p) => secureInvoke('stats.inc', p || {}),
+    range: (p) => secureInvoke('stats.range', p || {})
+  }
 };
 
 contextBridge.exposeInMainWorld('MT', api);

@@ -30,6 +30,7 @@
     "form-data": "^4.0.0"
   },
   "dependencies": {
+    "better-sqlite3": "^9.4.0",
     "fs-extra": "^11.0.0",
     "yauzl": "^2.10.0"
   },
@@ -43,7 +44,9 @@
     "compression": "maximum",
     "asar": true,
     "asarUnpack": [
-      "plugins/**/*"
+      "plugins/**/*",
+      "**/*.node",
+      "node_modules/better-sqlite3/**"
     ],
     "files": [
       "src/**/*",

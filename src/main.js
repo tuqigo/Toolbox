@@ -25,6 +25,7 @@ const { UsageStore } = require('./core/usageStore');
 const { ConfigStore } = require('./core/configStore');
 const { PluginInstaller } = require('./core/pluginInstaller');
 const { IconManager } = require('./core/iconManager');
+const { DBStore } = require('./core/dbStore');
 
 class MiniToolbox {
   constructor() {
@@ -51,7 +52,21 @@ class MiniToolbox {
     this.pluginInstaller = new PluginInstaller({ isQuiet: this.isQuiet });
     this.iconManager = new IconManager();
     this.devLoggingInitialized = false;
+
+    // SQLite 存储（延迟打开）
+    this.dbStore = new DBStore({
+      baseDir: this.getDataDir(),
+      maxKeysPerPlugin: 1000,
+      maxValueBytes: 256 * 1024
+    });
     
+    // SQLite 存储（延迟打开，按需使用）
+    this.dbStore = new DBStore({
+      baseDir: this.getDataDir(),
+      maxKeysPerPlugin: 1000,
+      maxValueBytes: 256 * 1024
+    });
+
     // 剪贴板忽略相关
     this.ignoreNextClipboardChange = false;
     this.clipboardIgnoreTimeout = null;
@@ -200,6 +215,10 @@ class MiniToolbox {
     this.tray.on('click', () => {
       this.toggleInputWindow();
     });
+  }
+
+  getDataDir() {
+    try { return app.getPath('userData'); } catch (e) { return app.getPath('userData'); }
   }
   async setTitlebarHeight(px) {
     try {
@@ -830,7 +849,7 @@ class MiniToolbox {
 
     // 安全调用网关
     ipcMain.handle('mt.secure-call', async (event, { pluginId, instanceId, channel, payload } = {}) => {
-      const pid = pluginId || getPluginIdFromEvent(event);
+      const pid = getPluginIdFromEvent(event);
       const meta = pid && this.pluginManager.get(pid);
       
       // 对于配置API，允许所有插件访问，不进行严格的插件ID验证
@@ -857,6 +876,56 @@ class MiniToolbox {
             return { ok: true };
           case 'net.request':
             return await this.performRequest(payload);
+          // DB & Stats 通道（仅允许真实来源插件访问自身命名空间）
+          case 'db.put': {
+            const { collection, key, value } = payload || {};
+            if (!pid) return { ok: false, error: 'unknown plugin' };
+            if (!collection || !key) return { ok: false, error: 'invalid payload' };
+            this.dbStore.put(pid, String(collection), String(key), value);
+            return { ok: true };
+          }
+          case 'db.get': {
+            const { collection, key } = payload || {};
+            if (!pid) return { ok: false, error: 'unknown plugin' };
+            if (!collection || !key) return { ok: false, error: 'invalid payload' };
+            const data = this.dbStore.get(pid, String(collection), String(key));
+            return { ok: true, data };
+          }
+          case 'db.del': {
+            const { collection, key } = payload || {};
+            if (!pid) return { ok: false, error: 'unknown plugin' };
+            if (!collection || !key) return { ok: false, error: 'invalid payload' };
+            this.dbStore.del(pid, String(collection), String(key));
+            return { ok: true };
+          }
+          case 'db.list': {
+            const { collection, prefix, limit, offset } = payload || {};
+            if (!pid) return { ok: false, error: 'unknown plugin' };
+            if (!collection) return { ok: false, error: 'invalid payload' };
+            const data = this.dbStore.list(pid, String(collection), { prefix, limit, offset });
+            return { ok: true, data };
+          }
+          case 'db.count': {
+            const { collection, prefix } = payload || {};
+            if (!pid) return { ok: false, error: 'unknown plugin' };
+            if (!collection) return { ok: false, error: 'invalid payload' };
+            const data = this.dbStore.count(pid, String(collection), { prefix });
+            return { ok: true, data };
+          }
+          case 'stats.inc': {
+            const { metric, value, ts } = payload || {};
+            if (!pid) return { ok: false, error: 'unknown plugin' };
+            if (!metric) return { ok: false, error: 'invalid payload' };
+            this.dbStore.statsInc(pid, String(metric), value, ts);
+            return { ok: true };
+          }
+          case 'stats.range': {
+            const { metric, from, to, groupBy } = payload || {};
+            if (!pid) return { ok: false, error: 'unknown plugin' };
+            if (!metric) return { ok: false, error: 'invalid payload' };
+            const data = this.dbStore.statsRange(pid, String(metric), from, to, groupBy);
+            return { ok: true, data };
+          }
           case 'ui.getTheme': {
             try {
               const { nativeTheme } = require('electron');
