@@ -13,6 +13,15 @@
   const btnZoomIn = $('btnZoomIn');
   const btnZoomOut = $('btnZoomOut');
   const btnZoomReset = $('btnZoomReset');
+  const btnSave = $('btnSave');
+  const btnHistory = $('btnHistory');
+  const historyModal = document.getElementById('historyModal');
+  const historyList = document.getElementById('historyList');
+  const btnCloseHistory = document.getElementById('btnCloseHistory');
+  const saveModal = document.getElementById('saveModal');
+  const saveNameInput = document.getElementById('saveNameInput');
+  const btnSaveCancel = document.getElementById('btnSaveCancel');
+  const btnSaveConfirm = document.getElementById('btnSaveConfirm');
 
   let currentZoom = 1;
   let renderCounter = 0;
@@ -366,6 +375,106 @@
     }
   }
 
+  // ============ 存储：保存/读取 ============
+  const COLLECTION = 'charts';
+
+  function showSaveModal() {
+    if (!saveModal) return;
+    const code = editor.value.trim();
+    if (!code) { setStatus('没有可保存的内容'); return; }
+    saveNameInput.value = '';
+    saveModal.style.display = 'block';
+    setTimeout(() => saveNameInput && saveNameInput.focus(), 0);
+  }
+
+  async function performSave() {
+    try {
+      if (!window.MT || !window.MT.db) { setStatus('存储不可用'); return; }
+      const code = editor.value.trim();
+      if (!code) { setStatus('没有可保存的内容'); return; }
+      const key = String(saveNameInput.value || '').trim();
+      if (!key) { setStatus('请输入名称'); return; }
+      const item = { name: key, code, saved_at: Date.now() };
+      await window.MT.db.put({ collection: COLLECTION, key, value: item });
+      saveModal.style.display = 'none';
+      setStatus('已保存');
+      try { await window.MT.stats.inc({ metric: 'saved' }); } catch {}
+    } catch (e) {
+      console.error(e);
+      setStatus('保存失败');
+    }
+  }
+
+  async function openHistory() {
+    try {
+      if (!window.MT || !window.MT.db) {
+        setStatus('存储不可用');
+        return;
+      }
+      const items = await window.MT.db.list({ collection: COLLECTION, limit: 100, offset: 0 });
+      renderHistory(items || []);
+      historyModal.style.display = 'block';
+    } catch (e) {
+      console.error(e);
+      setStatus('加载历史失败');
+    }
+  }
+
+  function renderHistory(items) {
+    historyList.innerHTML = '';
+    if (!items.length) {
+      historyList.innerHTML = '<div style="padding:12px; color:#6c757d;">暂无记录</div>';
+      return;
+    }
+    items.forEach(r => {
+      const row = document.createElement('div');
+      row.style.border = '1px solid #e9ecef';
+      row.style.borderRadius = '6px';
+      row.style.padding = '10px';
+      row.style.marginBottom = '8px';
+      row.style.display = 'flex';
+      row.style.justifyContent = 'space-between';
+      row.style.alignItems = 'center';
+
+      const meta = document.createElement('div');
+      meta.innerHTML = `<div style="font-weight:600; color:#343a40;">${r.key}</div>
+                        <div style="color:#6c757d; font-size:12px;">${new Date(r.updated_at*1000).toLocaleString()}</div>`;
+
+      const actions = document.createElement('div');
+      const btnLoad = document.createElement('button');
+      btnLoad.className = 'btn';
+      btnLoad.style.marginRight = '8px';
+      btnLoad.textContent = '打开';
+      btnLoad.onclick = async () => {
+        try {
+          const rec = await window.MT.db.get({ collection: COLLECTION, key: r.key });
+          if (rec && rec.value && rec.value.code) {
+            editor.value = rec.value.code;
+            await renderDiagram();
+            historyModal.style.display = 'none';
+          }
+        } catch (e) { console.error(e); }
+      };
+
+      const btnDelete = document.createElement('button');
+      btnDelete.className = 'btn';
+      btnDelete.textContent = '删除';
+      btnDelete.onclick = async () => {
+        if (!confirm(`确认删除 "${r.key}"?`)) return;
+        try {
+          await window.MT.db.del({ collection: COLLECTION, key: r.key });
+          row.remove();
+        } catch (e) { console.error(e); }
+      };
+
+      actions.appendChild(btnLoad);
+      actions.appendChild(btnDelete);
+      row.appendChild(meta);
+      row.appendChild(actions);
+      historyList.appendChild(row);
+    });
+  }
+
   // 事件监听器
   btnRender.addEventListener('click', renderDiagram);
   btnClear.addEventListener('click', clearEditor);
@@ -374,6 +483,12 @@
   btnZoomIn.addEventListener('click', zoomIn);
   btnZoomOut.addEventListener('click', zoomOut);
   btnZoomReset.addEventListener('click', zoomReset);
+  btnSave.addEventListener('click', showSaveModal);
+  btnHistory.addEventListener('click', openHistory);
+  if (btnCloseHistory) btnCloseHistory.addEventListener('click', () => (historyModal.style.display = 'none'));
+  if (btnSaveCancel) btnSaveCancel.addEventListener('click', () => (saveModal.style.display = 'none'));
+  if (btnSaveConfirm) btnSaveConfirm.addEventListener('click', performSave);
+  if (saveNameInput) saveNameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') performSave(); });
 
   // 示例点击事件
   document.querySelectorAll('.example-item').forEach(item => {

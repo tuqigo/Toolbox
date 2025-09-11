@@ -218,7 +218,7 @@ class MiniToolbox {
   }
 
   getDataDir() {
-    try { return app.getPath('userData'); } catch (e) { return app.getPath('userData'); }
+    try { return path.join(app.getPath('userData'), 'data'); } catch (e) { return path.join(app.getPath('userData'), 'data'); }
   }
   async setTitlebarHeight(px) {
     try {
