@@ -5,6 +5,7 @@ const { BrowserWindow } = require('electron');
 class WindowManager {
   constructor(options = {}) {
     this.isQuiet = !!options.isQuiet;
+    this.isDev = !!options.isDev;
     // 统一改为按实例键存储；单例时实例键即为 pluginId
     this.windows = new Map(); // key -> BrowserWindow
     this.pluginIdToInstanceKeys = new Map(); // pluginId -> Set(key)
@@ -101,6 +102,8 @@ class WindowManager {
       win.__mtPluginId = pluginMeta.id;
       win.__mtInstanceId = instanceId;
       win.__mtInstanceKey = key;
+      // 失焦自动隐藏配置：默认 false，可在 plugin.json 的 window.hideOnBlur:true 开启
+      win.__mtHideOnBlur = !!(pluginMeta.window && pluginMeta.window.hideOnBlur === true);
     } catch {}
 
     // 先登记映射（主窗口可选）
@@ -169,6 +172,7 @@ class WindowManager {
       win.on('resize', setViewBounds);
       const url = new URL('file://' + path.join(__dirname, '../ui/chrome.html'));
       url.searchParams.set('id', pluginMeta.id);
+      url.searchParams.set('dev', this.isDev ? '1' : '0');
       url.searchParams.set('instanceId', instanceId);
       url.searchParams.set('name', pluginMeta.name || pluginMeta.id);
       url.searchParams.set('icon', pluginMeta.icon || '🔧');
@@ -205,7 +209,7 @@ class WindowManager {
     // 失去焦点时自动隐藏（被钉住则不隐藏）
     win.on('blur', () => {
       try {
-        if (!win.isDestroyed() && !win.__mtPinned) win.hide();
+        if (!win.isDestroyed() && !win.__mtPinned && win.__mtHideOnBlur) win.hide();
       } catch {}
     });
     this.windows.set(key, win);
@@ -322,9 +326,7 @@ class WindowManager {
       for (const [, v] of this.chromeViews.entries()) {
         try { v.webContents.send('ui-theme', payload); } catch {}
       }
-      for (const [, v] of this.contentViews.entries()) {
-        try { v.webContents.send('ui-theme', payload); } catch {}
-      }
+      // 按新策略：不再向插件内容视图发送主题事件
     } catch {}
   }
 

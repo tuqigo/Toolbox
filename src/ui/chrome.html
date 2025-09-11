@@ -25,6 +25,7 @@
     </div>
     <div class="right">
       <div class="btn btn-pin" id="tnPin" title="钉住"><svg width="18" height="18" viewBox="0 0 24 24"><path d="M14 2l4 4-3 3 4 4-2 2-4-4-3 3-4-4 3-3-4-4 2-2 4 4 3-3z" stroke="#666" stroke-width="1.5" fill="transparent"/></svg></div>
+      <div class="btn" id="tnDev" title="开发者工具" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5" stroke="#666" stroke-width="2" stroke-linecap="round" fill="transparent"/></svg></div>
       <div class="btn" id="tnMin" title="最小化"><svg width="16" height="16" viewBox="0 0 24 24"><path d="M5 12h14" stroke="#666" stroke-width="2" stroke-linecap="round"/></svg></div>
       <div class="btn" id="tnMax" title="最大化/还原"><svg width="16" height="16" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" stroke="#666" stroke-width="2" fill="transparent"/></svg></div>
       <div class="btn btn-close" id="tnClose" title="关闭"><svg width="16" height="16" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6l-12 12" stroke="#d33" stroke-width="2" stroke-linecap="round"/></svg></div>
@@ -37,6 +38,7 @@
       const name = qs('name') || id;
       const instanceId = qs('instanceId') || 'default';
       const icon = qs('icon') || '🔧';
+      const isDev = qs('dev') === '1';
       document.getElementById('title').textContent = name;
       document.getElementById('icon').textContent = icon;
 
@@ -47,6 +49,15 @@
       }
       function safe(fn){ try { fn(); } catch(e) { console && console.warn && console.warn('[mt.chrome]', e); } }
       pinEl.addEventListener('click', ()=> safe(()=>{ setPinned(!pinned); window.MTChrome && window.MTChrome.pin && window.MTChrome.pin(id, instanceId, pinned); }));
+      const devEl = document.getElementById('tnDev');
+      if (devEl && isDev) {
+        devEl.style.display = 'inline-flex';
+        devEl.addEventListener('click', ()=> safe(()=>{
+          // 打开 DevTools 前先钉住，避免 hideOnBlur=true 时失焦被隐藏
+          try { setPinned(true); window.MTChrome && window.MTChrome.pin && window.MTChrome.pin(id, instanceId, true); } catch{}
+          window.MTChrome && window.MTChrome.devtools && window.MTChrome.devtools(id, instanceId, 'toggle');
+        }));
+      }
       document.getElementById('tnMin').addEventListener('click', ()=> safe(()=>{ window.MTChrome.win(id, instanceId, 'minimize'); }));
       document.getElementById('tnMax').addEventListener('click', ()=> safe(()=>{ window.MTChrome.win(id, instanceId, 'toggle-maximize'); }));
       document.getElementById('tnClose').addEventListener('click', ()=> safe(()=>{ window.MTChrome.win(id, instanceId, 'close'); }));

@@ -59,6 +59,10 @@ class PluginManager {
       resizable: true,
       ...manifest.window
     };
+    // 新增窗口行为默认：失焦不自动隐藏（可通过 manifest.window.hideOnBlur 显式 true 开启）
+    if (!('hideOnBlur' in windowCfg)) {
+      windowCfg.hideOnBlur = false;
+    }
     
     // 通过检查是否存在 index.html 来判断是否有UI
     const indexHtmlPath = path.join(pluginPath, 'index.html');
@@ -95,7 +99,7 @@ class PluginManager {
       path: pluginPath,
       icon: manifest.logo || '🔧',
       window: windowCfg,
-      // 单例/多实例：默认单例
+      // 单例/多实例：默认多实例
       instanceMode: (function(){
         try {
           if (typeof manifest.instance === 'string') {
@@ -103,7 +107,7 @@ class PluginManager {
           }
           if (manifest.multiInstance === true) return 'multi';
         } catch {}
-        return 'single';
+        return 'multi';
       })(),
       ui,
       main: ui ? 'index.html' : null,

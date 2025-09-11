@@ -8,11 +8,11 @@
   "ui": true,
   "window": {
     "width": 800,
+    "hideOnBlur": false,
     "height": 600,
     "resizable": true,
     "center": true
   },
-  "permissions": ["config"],
   "features": [
     {
       "code": "settings.open",

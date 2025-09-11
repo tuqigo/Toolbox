@@ -68,25 +68,5 @@ const api = {
 
 contextBridge.exposeInMainWorld('MT', api);
 
-// 监听主题变化，向插件页发送自定义事件，供插件选择性响应
-try {
-  const applyTheme = (payload) => {
-    try {
-      const evt = new CustomEvent('mt-theme-change', { detail: payload });
-      window.dispatchEvent(evt);
-      // 也注入一个 CSS 变量，方便简单适配
-      const eff = (payload && payload.effective) || 'light';
-      const root = document.documentElement;
-      if (eff === 'dark') {
-        root.style.setProperty('--mt-bg', '#1f2023');
-        root.style.setProperty('--mt-fg', '#e6e7ea');
-      } else {
-        root.style.setProperty('--mt-bg', '#ffffff');
-        root.style.setProperty('--mt-fg', '#333333');
-      }
-    } catch {}
-  };
-  const { ipcRenderer } = require('electron');
-  ipcRenderer.on('ui-theme', (_e, payload) => applyTheme(payload));
-} catch {}
+// 不再向插件发送主题变更事件；插件下次打开即可应用最新主题
 

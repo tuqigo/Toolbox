@@ -44,7 +44,7 @@ class MiniToolbox {
     this.configStore = new ConfigStore({ isQuiet: this.isQuiet });
     this.pluginManager = new PluginManager({ isQuiet: this.isQuiet });
     this.inputAnalyzer = new InputAnalyzer({ isQuiet: this.isQuiet });
-    this.windowManager = new WindowManager({ isQuiet: this.isQuiet });
+    this.windowManager = new WindowManager({ isQuiet: this.isQuiet, isDev: this.isDev });
     this.clipboardStore = new ClipboardStore({ isQuiet: this.isQuiet, maxItems: 500 });
     this.usageStore = new UsageStore({ isQuiet: this.isQuiet });
     this.matcher = new Matcher({ isQuiet: this.isQuiet, usageStore: this.usageStore });
@@ -1050,6 +1050,17 @@ class MiniToolbox {
     // 插件窗口 DevTools 控制
     ipcMain.on('mt.plugin.devtools', (_e, { pluginId, instanceId, open, toggle } = {}) => {
       try {
+        // 目标改为插件内容视图的 webContents
+        const contentWc = this.windowManager.getContentWebContents(pluginId, instanceId);
+        if (contentWc && !contentWc.isDestroyed()) {
+          if (toggle) {
+            if (contentWc.isDevToolsOpened()) contentWc.closeDevTools(); else contentWc.openDevTools({ mode: 'detach' });
+            return;
+          }
+          if (open) contentWc.openDevTools({ mode: 'detach' }); else contentWc.closeDevTools();
+          return;
+        }
+        // 兜底：如果没拿到内容视图，退回窗口 webContents
         const win = this.windowManager.getWindow(pluginId, instanceId);
         if (!win || win.isDestroyed()) return;
         const wc = win.webContents;
