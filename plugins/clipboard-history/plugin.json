@@ -2,6 +2,7 @@
   "name": "剪贴板历史",
   "description": "查看、搜索、复制、删除和清空剪贴板历史",
   "logo": "🔧",
+  "instance": "single",
   "window": { "width": 720, "height": 560, "resizable": true },
   "features": [
     {

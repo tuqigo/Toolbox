@@ -7,10 +7,6 @@ const pluginId = pluginIdArg ? pluginIdArg.split('=')[1] : null;
 const instanceIdArg = argv.find(a => String(a||'').startsWith('--mt-instance-id='));
 const instanceId = instanceIdArg ? instanceIdArg.split('=')[1] : 'default';
 
-// 兼容 API：权限改为统一控制，此接口返回空数组（不再基于 manifest）
-function getPermissions() {
-  return ipcRenderer.invoke('mt.get-permissions').catch(() => []);
-}
 
 async function secureInvoke(channel, payload) {
   const res = await ipcRenderer.invoke('mt.secure-call', { pluginId, instanceId, channel, payload });
@@ -60,10 +56,8 @@ const api = {
     clear: () => secureInvoke('clip.clear'),
     copy: (text) => secureInvoke('clip.copy', String(text || ''))
   },
-  // 工具
-  utils: {
-    getPermissions
-  }
+  // 工具（预留占位，无权限查询接口）
+  utils: {}
 };
 
 contextBridge.exposeInMainWorld('MT', api);

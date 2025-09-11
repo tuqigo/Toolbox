@@ -967,9 +967,7 @@ class MiniToolbox {
         return { ok: false, error: e && e.message || String(e) };
       }
     });
-    // 返回插件权限（供插件自查）
-    // 权限不再由 manifest 声明（保留接口但返回空数组）
-    ipcMain.handle('mt.get-permissions', async () => []);
+    // 旧的权限查询接口已移除（mt.get-permissions）
     // 获取剪贴板内容（原始方法，保持兼容性）
     ipcMain.handle('get-clipboard', () => {
       return clipboard.readText();

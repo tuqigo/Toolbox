@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "MiniToolbox Team",
   "icon": "⚙️",
-  "ui": true,
+  "instance": "single",
   "window": {
     "width": 800,
     "hideOnBlur": false,

@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "author": "MiniToolbox Team",
   "logo": "🏪",
+  "instance": "single",
   "window": {
     "width": 1000,
     "height": 700,
