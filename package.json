@@ -76,7 +76,8 @@
       "node_modules/process-nextick-args/**/*",
       "node_modules/safe-buffer/**/*",
       "node_modules/string_decoder/**/*",
-      "node_modules/util-deprecate/**/*"
+      "node_modules/util-deprecate/**/*",
+      "node_modules/better-sqlite3/**/*"
     ],
     "extraResources": [],
     "win": {

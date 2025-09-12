@@ -53,13 +53,6 @@ class MiniToolbox {
     this.iconManager = new IconManager();
     this.devLoggingInitialized = false;
 
-    // SQLite 存储（延迟打开）
-    this.dbStore = new DBStore({
-      baseDir: this.getDataDir(),
-      maxKeysPerPlugin: 1000,
-      maxValueBytes: 256 * 1024
-    });
-    
     // SQLite 存储（延迟打开，按需使用）
     this.dbStore = new DBStore({
       baseDir: this.getDataDir(),

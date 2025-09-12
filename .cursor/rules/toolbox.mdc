@@ -1,0 +1,71 @@
+---
+description: MiniToolbox - 项目规则与高频不变量（供 AI 每回合参考）
+globs: ["src/**/*", "plugins/**/*", "tools/**/*", "docs/**/*", "*.js", "*.json", "*.html", "*.css", "*.md"]
+alwaysApply: true
+---
+
+# MiniToolbox 项目规则（高信号版）
+
+## 不变量（必须遵循）
+- **架构**: “注册-匹配-决策”；“一切皆插件”；主进程入口 `src/main.js` 单点管理。
+- **受限 API**: 插件与渲染进程通过 `window.MT`（`mt.secure-call`）访问系统能力；禁止插件直连 Node/FS。
+- **通信**: 所有用户交互与系统调用经 IPC；避免在渲染/插件中直接访问敏感 API。
+- **风格**: ES6+；异步优先 `async/await`；错误用 `try/catch`。
+- **安全**: 插件沙箱运行；外部输入需要转义防 XSS。
+- **输出语言**: 默认中文简体。
+- **ID**: 插件 ID 由系统生成与管理（目录名/内容哈希/注册中心），无需手配，避免假定固定 ID。
+
+## 关键文件职责索引
+- `src/main.js`: 应用入口，注册核心模块、窗口与 IPC。
+- `src/core/pluginManager.js`: 插件加载/启停/上下文管理。
+- `src/core/pluginInstaller.js`: 插件安装/校验/打包安装。
+- `src/core/pluginIdManager.js`: 插件 ID 生成/映射/去重。
+- `src/core/inputAnalyzer.js`: 输入规范化/意图识别/分发前处理。
+- `src/core/matcher.js`: `features.cmds`（keyword/regex/prefix）匹配决策。
+- `src/core/ruleCompiler.js`: 规则编译与执行计划生成。
+- `src/core/windowManager.js`: 窗口生命周期与 UI 插件窗口。
+- `src/core/usageStore.js`: 使用统计与持久化。
+- `src/core/clipboardStore.js`: 剪贴板记录与查询。
+- `src/core/dbStore.js`: 轻量数据存储抽象。
+- `src/core/iconManager.js`: 插件与功能图标管理。
+- `src/plugin-api/api.js`: 兼容层，将 `MiniToolboxAPI/MTAPI` 指向 `window.MT`。
+- `src/preload/plugin-preload.js`: 通过 `contextBridge` 暴露 `window.MT`。
+- `src/renderer/*`: 主输入框 UI 与结果列表、与主进程 IPC。
+- `plugins/*`: 官方内置插件示例（`plugin.json` + `index.html`/`script.js`）。
+- `docs/PLUGIN_DEVELOPMENT.md`: 插件开发与 API 用法详解。
+
+## 插件开发要点
+- 目录要求：`plugin.json` 必须；UI 插件需 `index.html`；无 UI 插件用 `script.js`。
+- `features` 数组定义功能，`cmds` 支持 `keyword`/`regex`/`prefix`。
+- UI 插件可在 `plugin.json.window` 指定窗口尺寸与约束。
+- 处理器约定（无 UI 插件）：
+  - `handleEnter(action, callbackSetList)`
+  - `handleSelect(action, itemData, callbackSetList)`
+  - `callbackSetList([{ title, description, data }])` 返回结果列表。
+- 可通过 `action.redirect('plugin-code', 'input')` 跳转至其他插件。
+
+## IPC 与受限 API（window.MT）
+- 统一入口：`await window.MT.invoke('mt.secure-call', { channel, payload })`
+- 常用通道：
+  - `clipboard.readText` / `clipboard.writeText`
+  - `openExternal`（打开外链）
+  - `net.request`（网络请求：hostname/path/method/body/headers）
+  - `ui.getTheme`（主题/配色）
+- UI 插件输入监听：`window.addEventListener('plugin-input', e => { /* e.detail */ })`
+- 兼容层：`window.MiniToolboxAPI`/`window.MTAPI` 会映射到 `window.MT`（见 `src/plugin-api/api.js`）
+
+## 匹配与交互
+- 匹配优先级由 `matcher` 与 `ruleCompiler` 决定；尽量用明确的 `keyword/prefix` 提升精度。
+- 输入校验与错误反馈必须通过结果项返回，避免抛未捕获异常。
+- 任何外部内容展示需转义；URL 必须校验协议（`http/https`）。
+
+## 常用命令
+- 开发：`npm run dev`
+- 便携版：`npm run build:win:portable`
+- 安装版：`npm run build:win:nsis`
+
+## 回答策略（AI）
+- 优先引用本仓代码与路径（`src/core/...`、`plugins/...`）；必要时给最小可行示例。
+- 新增能力时，遵循：入口在 `src/main.js` 注册 → 放入对应 `src/core/*` 模块 → 暴露到 `window.MT`。
+- 插件问题优先参考 `docs/PLUGIN_DEVELOPMENT.md` 与内置 `plugins/*` 实例。
+- 若需外部能力，建议通过 `mt.secure-call` 扩展通道，不在插件中直调 Node API。
