@@ -43,6 +43,7 @@ alwaysApply: true
   - `handleSelect(action, itemData, callbackSetList)`
   - `callbackSetList([{ title, description, data }])` 返回结果列表。
 - 可通过 `action.redirect('plugin-code', 'input')` 跳转至其他插件。
+- 你修改的代码需要详细的日志,需要做到看日志能理解你的代码意图
 
 ## IPC 与受限 API（window.MT）
 - 统一入口：`await window.MT.invoke('mt.secure-call', { channel, payload })`

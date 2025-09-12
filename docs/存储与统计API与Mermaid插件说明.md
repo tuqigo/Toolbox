@@ -5,14 +5,14 @@
 - 主程序新增的本地存储与统计能力（基于 SQLite，暴露给插件的 `MT.db` 与 `MT.stats`）。
 - `mermaid-viewer` 插件的“保存图表/历史”功能及使用方法。
 
-目标：为所有插件提供统一、隔离、安全、可控的本地数据存储与基础统计能力；并示范在插件中落地存储/读取的最佳实践。
+目标：为所有插件提供统一、隔离、安全、可控的本地数据存储与基础统计能力；并示范在插件中落地存储/读取的最佳实践。2025-09 起，插件侧 API 已简化：collection 由系统自动设置为“当前 featureCode”，无需插件显式传入。
 
 ---
 
 ## 架构设计
 
 - 存储引擎：主进程使用 `better-sqlite3`，单库文件 `data.sqlite` 位于 `app.getPath('userData')` 目录。
-- 命名空间：统一使用两张表，并以 `plugin_id` 实现严格隔离。
+- 命名空间：统一使用两张表，并以 `plugin_id` 严格隔离；多 feature 以 `collection=featureCode` 进一步隔离。
   - `kv(plugin_id, collection, key, value, updated_at)`
   - `events(id, plugin_id, metric, value, ts)`
 - 访问边界：渲染进程插件通过预加载暴露的 API 调用主进程网关 `mt.secure-call`，主进程依据事件来源解析真实 `plugin_id`，拒绝越权访问。
@@ -25,25 +25,26 @@
 
 ## 插件 API
 
-预加载 `src/preload/plugin-preload.js` 暴露的可用接口：
+预加载 `src/preload/plugin-preload.js` 暴露的可用接口（简化版）：
 
 ```js
 // KV
-await MT.db.put({ collection, key, value })
-await MT.db.get({ collection, key })              // => { value, updated_at } | null
-await MT.db.del({ collection, key })
-await MT.db.list({ collection, prefix?, limit?, offset? })
-await MT.db.count({ collection, prefix? })
+await MT.db.put(key, value)
+await MT.db.get(key)                     // => { value, updated_at } | null
+await MT.db.del(key)
+await MT.db.list({ prefix?, limit?, offset? })
+await MT.db.count({ prefix? })
 
 // 统计
-await MT.stats.inc({ metric, value=1, ts? })
-await MT.stats.range({ metric, from, to, groupBy: 'day'|'hour' })
+await MT.stats.inc(metric, value=1)
+await MT.stats.range(metric, { from, to, groupBy: 'day'|'hour' })
 ```
 
 注意：
-- `collection` 建议使用功能域名，如 `charts`、`notes`、`prefs` 等。
+- 插件无需也不能再传 `collection`；系统将其设置为“当前 featureCode”。同一插件下不同 feature 的数据天然相互隔离。
 - `value` 支持任意可 JSON 序列化对象，主进程会自动做字符串化与解析。
 - 统计是“事件累加 + 时间聚合”，适合做趋势图、使用次数等分析。
+  - 统计的 `metric` 会自动加上 `featureCode.` 前缀（如 `mermaid.sequence.saved`）。
 
 ---
 
@@ -51,7 +52,7 @@ await MT.stats.range({ metric, from, to, groupBy: 'day'|'hour' })
 
 新增的 UI：
 - 工具栏：
-  - 保存图表：输入一个名称，将当前编辑器中的 Mermaid 代码保存到本地数据库的 `charts` 集合，键即名称。
+  - 保存图表：输入一个名称，将当前编辑器中的 Mermaid 代码保存到本地数据库（collection 自动使用当前 featureCode，如 `mermaid.sequence`），键即名称。
   - 历史：打开已保存图表列表，支持“打开/删除”。
 - 弹窗：
   - 保存命名弹窗：输入图表名称后确认保存。
@@ -67,7 +68,7 @@ await MT.stats.range({ metric, from, to, groupBy: 'day'|'hour' })
 ```
 
 统计：
-- 每次成功保存会调用 `MT.stats.inc({ metric: 'saved' })`，便于后续聚合查看保存行为趋势。
+- 每次成功保存会调用 `MT.stats.inc('saved', 1)`，后台实际计入 `mermaid.sequence.saved`。
 
 ---
 
@@ -111,6 +112,7 @@ npx electron-rebuild -f -w better-sqlite3
 
 - 主进程只信任事件来源解析的 `pluginId`，忽略 payload 中的插件 ID，杜绝越权访问。
 - 未暴露任意 SQL 通道；插件仅能通过标准 API 读写自身命名空间下的数据。
+- collection 不再由插件提供，改为由系统以“当前 featureCode”确定，避免多 feature 之间的相互覆盖或误用。
 - 配额：每插件 <= 1000 键；单值 <= 256KB；超过时报错，避免存储被滥用。
 - 建议：
   - 名称规范化（避免过长/特殊字符）。
@@ -121,30 +123,30 @@ npx electron-rebuild -f -w better-sqlite3
 
 ## 示例代码片段（插件侧）
 
-保存：
+保存（collection 自动为当前 featureCode）：
 ```js
-await MT.db.put({ collection: 'charts', key: name, value: { name, code, saved_at: Date.now() } });
+await MT.db.put(name, { name, code, saved_at: Date.now() });
 ```
 
 读取列表：
 ```js
-const items = await MT.db.list({ collection: 'charts', limit: 100 });
+const items = await MT.db.list({ limit: 100 });
 ```
 
 载入：
 ```js
-const rec = await MT.db.get({ collection: 'charts', key: name });
+const rec = await MT.db.get(name);
 editor.value = rec?.value?.code || '';
 ```
 
 删除：
 ```js
-await MT.db.del({ collection: 'charts', key: name });
+await MT.db.del(name);
 ```
 
 统计：
 ```js
-await MT.stats.inc({ metric: 'saved' });
+await MT.stats.inc('saved', 1);
 ```
 
 ---
@@ -156,10 +158,10 @@ await MT.stats.inc({ metric: 'saved' });
   - 初始化 `DBStore`；
   - `mt.secure-call` 仅信任事件来源；
   - 新增 `db.*`、`stats.*` 通道。
-- 修改 `src/preload/plugin-preload.js`：暴露 `MT.db` 与 `MT.stats`。
+- 修改 `src/preload/plugin-preload.js`：暴露简化版 `MT.db` 与 `MT.stats`，自动携带当前 `featureCode`。
 - 修改 `plugins/mermaid-viewer`：
   - 工具栏增加“保存图表/历史”；
   - 保存命名/历史列表弹窗；
-  - 调用 `MT.db` 与 `MT.stats` 实现保存与读取。
+  - 改用简化后的 `MT.db` 与 `MT.stats` 实现保存与读取。
 
 

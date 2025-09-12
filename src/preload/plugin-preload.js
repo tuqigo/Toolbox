@@ -6,6 +6,8 @@ const pluginIdArg = argv.find(a => String(a||'').startsWith('--mt-plugin-id='));
 const pluginId = pluginIdArg ? pluginIdArg.split('=')[1] : null;
 const instanceIdArg = argv.find(a => String(a||'').startsWith('--mt-instance-id='));
 const instanceId = instanceIdArg ? instanceIdArg.split('=')[1] : 'default';
+const featureArg = argv.find(a => String(a||'').startsWith('--mt-feature-code='));
+let currentFeatureCode = featureArg ? featureArg.split('=')[1] : '';
 
 
 async function secureInvoke(channel, payload) {
@@ -20,6 +22,9 @@ const api = {
   version: '1.0.0',
   onInput(callback) {
     ipcRenderer.on('plugin-input', (_e, payload) => callback(payload));
+    ipcRenderer.on('plugin-input', (_e, payload) => {
+      try { if (payload && payload.featureCode) currentFeatureCode = String(payload.featureCode || ''); } catch {}
+    });
   },
   // 统一网关
   invoke: secureInvoke,
@@ -60,15 +65,17 @@ const api = {
   utils: {},
   // SQLite KV & 统计
   db: {
-    put: (p) => secureInvoke('db.put', p || {}),
-    get: (p) => secureInvoke('db.get', p || {}),
-    del: (p) => secureInvoke('db.del', p || {}),
-    list: (p) => secureInvoke('db.list', p || {}),
-    count: (p) => secureInvoke('db.count', p || {})
+    // 最简 API：后台以当前 featureCode 作为 collection
+    put: (key, value) => secureInvoke('db.put', { featureCode: currentFeatureCode, key: String(key), value }),
+    get: (key) => secureInvoke('db.get', { featureCode: currentFeatureCode, key: String(key) }),
+    del: (key) => secureInvoke('db.del', { featureCode: currentFeatureCode, key: String(key) }),
+    list: (opts) => secureInvoke('db.list', { ...(opts||{}), featureCode: currentFeatureCode }),
+    count: (opts) => secureInvoke('db.count', { ...(opts||{}), featureCode: currentFeatureCode })
   },
   stats: {
-    inc: (p) => secureInvoke('stats.inc', p || {}),
-    range: (p) => secureInvoke('stats.range', p || {})
+    // 最简 API：将 featureCode 作为 metric 前缀，便于区分各 feature
+    inc: (metric, value) => secureInvoke('stats.inc', { metric: `${currentFeatureCode}.${String(metric)}`, value }),
+    range: (metric, opts) => secureInvoke('stats.range', { metric: `${currentFeatureCode}.${String(metric)}`, ...(opts || {}) })
   }
 };
 

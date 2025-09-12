@@ -599,6 +599,7 @@ class MiniToolbox {
                 timestamp: inputData.timestamp,
                 featureCode: inputData.featureCode
               };
+              try { if (inputData.featureCode) this.windowManager.setFeatureCodeForWebContents(targetWc, inputData.featureCode); } catch {}
               targetWc.send('plugin-input', safeInputData);
             }
           } catch {}
@@ -670,6 +671,12 @@ class MiniToolbox {
       };
       
       try {
+        // 记录 featureCode 到对应的内容视图，便于 DB 默认 collection 推断
+        try {
+          const pluginWindow = this.windowManager.getWindow(plugin.id, 'default');
+          const contentWc = this.windowManager.getContentWebContentsForWindow(pluginWindow) || this.windowManager.getContentWebContents(plugin.id, 'default');
+          if (contentWc) this.windowManager.setFeatureCodeForWebContents(contentWc, featureCode);
+        } catch {}
         await featureHandler.handleEnter(action, callbackSetList);
       } catch (error) {
         console.error('执行插件进入事件失败:', error);
@@ -898,37 +905,56 @@ class MiniToolbox {
             return await this.performRequest(payload);
           // DB & Stats 通道（仅允许真实来源插件访问自身命名空间）
           case 'db.put': {
-            const { collection, key, value } = payload || {};
+            let { collection, key, value, featureCode: fc } = payload || {};
             if (!pid) return { ok: false, error: 'unknown plugin' };
-            if (!collection || !key) return { ok: false, error: 'invalid payload' };
+            if (!key) return { ok: false, error: 'invalid payload' };
+            // 默认 collection：最近一次的 featureCode；若无则使用 'default'
+            if (!collection) {
+              const wc = event && event.sender;
+              collection = String(fc || this.windowManager.getFeatureCodeForWebContents(wc) || 'default');
+            }
             this.dbStore.put(pid, String(collection), String(key), value);
             return { ok: true };
           }
           case 'db.get': {
-            const { collection, key } = payload || {};
+            let { collection, key, featureCode: fc } = payload || {};
             if (!pid) return { ok: false, error: 'unknown plugin' };
-            if (!collection || !key) return { ok: false, error: 'invalid payload' };
+            if (!key) return { ok: false, error: 'invalid payload' };
+            if (!collection) {
+              const wc = event && event.sender;
+              collection = String(fc || this.windowManager.getFeatureCodeForWebContents(wc) || 'default');
+            }
             const data = this.dbStore.get(pid, String(collection), String(key));
             return { ok: true, data };
           }
           case 'db.del': {
-            const { collection, key } = payload || {};
+            let { collection, key, featureCode: fc } = payload || {};
             if (!pid) return { ok: false, error: 'unknown plugin' };
-            if (!collection || !key) return { ok: false, error: 'invalid payload' };
+            if (!key) return { ok: false, error: 'invalid payload' };
+            if (!collection) {
+              const wc = event && event.sender;
+              collection = String(fc || this.windowManager.getFeatureCodeForWebContents(wc) || 'default');
+            }
             this.dbStore.del(pid, String(collection), String(key));
             return { ok: true };
           }
           case 'db.list': {
-            const { collection, prefix, limit, offset } = payload || {};
+            let { collection, prefix, limit, offset, featureCode: fc } = payload || {};
             if (!pid) return { ok: false, error: 'unknown plugin' };
-            if (!collection) return { ok: false, error: 'invalid payload' };
+            if (!collection) {
+              const wc = event && event.sender;
+              collection = String(fc || this.windowManager.getFeatureCodeForWebContents(wc) || 'default');
+            }
             const data = this.dbStore.list(pid, String(collection), { prefix, limit, offset });
             return { ok: true, data };
           }
           case 'db.count': {
-            const { collection, prefix } = payload || {};
+            let { collection, prefix, featureCode: fc } = payload || {};
             if (!pid) return { ok: false, error: 'unknown plugin' };
-            if (!collection) return { ok: false, error: 'invalid payload' };
+            if (!collection) {
+              const wc = event && event.sender;
+              collection = String(fc || this.windowManager.getFeatureCodeForWebContents(wc) || 'default');
+            }
             const data = this.dbStore.count(pid, String(collection), { prefix });
             return { ok: true, data };
           }
@@ -1233,6 +1259,11 @@ class MiniToolbox {
             featureCode: featureCode,
             redirect: redirect
           };
+          try {
+            const pluginWindow = this.windowManager.getWindow(pluginId, 'default');
+            const contentWc = this.windowManager.getContentWebContentsForWindow(pluginWindow) || this.windowManager.getContentWebContents(pluginId, 'default');
+            if (contentWc) this.windowManager.setFeatureCodeForWebContents(contentWc, featureCode);
+          } catch {}
           await featureHandler.handleSearch(action, String(query || ''), callbackSetList);
         }
       } catch (error) {
@@ -1276,6 +1307,11 @@ class MiniToolbox {
           };
 
           if (this.isDev) console.log(`[DEBUG] 调用 ${featureCode} 的 handleSelect`);
+          try {
+            const pluginWindow = this.windowManager.getWindow(pluginId, 'default');
+            const contentWc = this.windowManager.getContentWebContentsForWindow(pluginWindow) || this.windowManager.getContentWebContents(pluginId, 'default');
+            if (contentWc) this.windowManager.setFeatureCodeForWebContents(contentWc, featureCode);
+          } catch {}
           await featureHandler.handleSelect(action, itemData, callbackSetList);
           if (this.isDev) console.log(`[DEBUG] ${featureCode} 的 handleSelect 执行完成`);
         }

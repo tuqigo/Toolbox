@@ -376,7 +376,7 @@
   }
 
   // ============ 存储：保存/读取 ============
-  const COLLECTION = 'charts';
+  // 使用后台简化后的 DB API：collection 由当前 featureCode 自动设置
 
   function showSaveModal() {
     if (!saveModal) return;
@@ -395,10 +395,10 @@
       const key = String(saveNameInput.value || '').trim();
       if (!key) { setStatus('请输入名称'); return; }
       const item = { name: key, code, saved_at: Date.now() };
-      await window.MT.db.put({ collection: COLLECTION, key, value: item });
+      await window.MT.db.put(key, item);
       saveModal.style.display = 'none';
       setStatus('已保存');
-      try { await window.MT.stats.inc({ metric: 'saved' }); } catch {}
+      try { await window.MT.stats.inc('saved', 1); } catch {}
     } catch (e) {
       console.error(e);
       setStatus('保存失败');
@@ -411,7 +411,7 @@
         setStatus('存储不可用');
         return;
       }
-      const items = await window.MT.db.list({ collection: COLLECTION, limit: 100, offset: 0 });
+      const items = await window.MT.db.list({ limit: 100, offset: 0 });
       renderHistory(items || []);
       historyModal.style.display = 'block';
     } catch (e) {
@@ -447,7 +447,7 @@
       btnLoad.textContent = '打开';
       btnLoad.onclick = async () => {
         try {
-          const rec = await window.MT.db.get({ collection: COLLECTION, key: r.key });
+          const rec = await window.MT.db.get(r.key);
           if (rec && rec.value && rec.value.code) {
             editor.value = rec.value.code;
             await renderDiagram();
@@ -462,7 +462,7 @@
       btnDelete.onclick = async () => {
         if (!confirm(`确认删除 "${r.key}"?`)) return;
         try {
-          await window.MT.db.del({ collection: COLLECTION, key: r.key });
+          await window.MT.db.del(r.key);
           row.remove();
         } catch (e) { console.error(e); }
       };

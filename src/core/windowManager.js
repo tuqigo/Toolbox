@@ -14,6 +14,7 @@ class WindowManager {
     this.contentViews = new Map(); // key -> BrowserView (content)
     this.chromeViews = new Map(); // key -> BrowserView (titlebar)
     this.chromeHeights = new Map(); // key -> number
+    this.webContentsToFeatureCode = new Map(); // wc.id -> last featureCode
     this.defaultChromeHeight = Math.max(32, Math.min(96, Number(options.titlebarHeight || 48)));
     this.defaultTheme = (options.defaultTheme || 'system'); // 'system' | 'light' | 'dark'
     this.instanceCounters = new Map(); // pluginId -> number
@@ -138,7 +139,8 @@ class WindowManager {
           preload: path.join(__dirname, '../preload/plugin-preload.js'),
           additionalArguments: [
             `--mt-plugin-id=${pluginMeta.id}`,
-            `--mt-instance-id=${instanceId}`
+            `--mt-instance-id=${instanceId}`,
+            `--mt-feature-code=__unknown__`
           ]
         }
       });
@@ -214,7 +216,7 @@ class WindowManager {
       } catch {}
       try { this.webContentsToPluginId.delete(win.webContents.id); } catch {}
       try { this.webContentsToInstanceKey.delete(win.webContents.id); } catch {}
-      try { const cv = this.contentViews.get(key); if (cv) { this.webContentsToPluginId.delete(cv.webContents.id); this.webContentsToInstanceKey.delete(cv.webContents.id); } } catch {}
+      try { const cv = this.contentViews.get(key); if (cv) { this.webContentsToPluginId.delete(cv.webContents.id); this.webContentsToInstanceKey.delete(cv.webContents.id); this.webContentsToFeatureCode.delete(cv.webContents.id); } } catch {}
       try { this.contentViews.delete(key); } catch {}
       try { this.chromeViews.delete(key); } catch {}
     });
@@ -266,6 +268,23 @@ class WindowManager {
       if (!key) return null;
       const v = this.contentViews.get(key);
       return v && v.webContents || null;
+    } catch { return null; }
+  }
+
+  // 记录/查询插件内容视图最近一次的 featureCode（用于 DB 默认 collection 推断）
+  setFeatureCodeForWebContents(wcOrId, featureCode) {
+    try {
+      const id = (wcOrId && wcOrId.id) || wcOrId;
+      if (!id) return;
+      this.webContentsToFeatureCode.set(id, String(featureCode || ''));
+    } catch {}
+  }
+
+  getFeatureCodeForWebContents(wcOrId) {
+    try {
+      const id = (wcOrId && wcOrId.id) || wcOrId;
+      if (!id) return null;
+      return this.webContentsToFeatureCode.get(id) || null;
     } catch { return null; }
   }
 
