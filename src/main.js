@@ -1640,6 +1640,8 @@ class MiniToolbox {
       
       this.startClipboardMonitoring();
       
+      this.showInputWindow();
+
       if (!this.isQuiet) {
         console.log('MiniToolbox 启动成功');
       }
