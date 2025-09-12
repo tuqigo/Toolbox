@@ -5,6 +5,7 @@
 
 const fs = require('fs-extra');
 const path = require('path');
+const { app } = require('electron');
 const crypto = require('crypto');
 const https = require('https');
 const { EventEmitter } = require('events');
@@ -14,13 +15,23 @@ const { PluginIdManager } = require('./pluginIdManager');
 class PluginInstaller extends EventEmitter {
   constructor(options = {}) {
     super();
-    this.pluginsDir = options.pluginsDir || path.join(__dirname, '../../plugins');
-    this.cacheDir = options.cacheDir || path.join(__dirname, '../../cache');
+    const resolvedBaseDir = (function(){
+      try {
+        if (options.baseDir) return options.baseDir;
+        return app.getPath('userData');
+      } catch (e) {
+        return path.join(process.cwd(), 'MiniToolboxData');
+      }
+    })();
+
+    this.pluginsDir = options.pluginsDir || path.join(resolvedBaseDir, 'plugins');
+    this.cacheDir = options.cacheDir || path.join(resolvedBaseDir, 'cache');
     this.registryUrl = options.registryUrl || 'https://registry.minitoolbox.com';
     this.isQuiet = !!options.isQuiet;
     this.tempDir = path.join(this.cacheDir, 'temp');
     this.idManager = new PluginIdManager({ isQuiet: this.isQuiet });
-    
+
+    // 目录初始化在构造时即可执行（指向用户目录，避免写入 asar）
     this.setupDirectories();
   }
 
