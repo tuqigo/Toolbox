@@ -718,6 +718,7 @@ class MiniToolboxRenderer {
       const displayDescription = plugin.featureCode ? 
         `${plugin.name} - ${plugin.description}` : 
         plugin.description;
+      const iconHtml = plugin.iconUrl ? `<img src="${plugin.iconUrl}" alt="${plugin.name}" />` : (plugin.icon || '🔧');
       
       return `
         <div class="result-item" 
@@ -730,7 +731,7 @@ class MiniToolboxRenderer {
              data-copy-enabled="${plugin.copyEnabled !== false ? 'true' : 'false'}"
              data-placeholder="${plugin.placeholder || ''}"
              data-index="${index}">
-          <div class="result-icon">${plugin.icon}</div>
+          <div class="result-icon">${iconHtml}</div>
           <div class="result-content">
             <div class="result-title">${displayTitle}</div>
             <div class="result-description">${displayDescription}</div>

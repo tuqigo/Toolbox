@@ -311,6 +311,14 @@ body {
     flex-shrink: 0;
 }
 
+/* 适配图片类插件 logo 尺寸，约束为缩略图大小内，保持居中 */
+.result-icon img {
+    width: calc(var(--thumbnail-size) * 0.8);
+    height: calc(var(--thumbnail-size) * 0.8);
+    object-fit: contain;
+    display: block;
+}
+
 .result-content {
     flex: 1;
     min-width: 0;

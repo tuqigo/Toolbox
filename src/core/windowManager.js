@@ -96,6 +96,17 @@ class WindowManager {
       }
     }
 
+    // 尝试为窗口应用插件自定义任务栏图标（仅支持位图/ico）
+    if (pluginMeta.iconPath && /\.(png|jpg|jpeg|gif|ico)$/i.test(pluginMeta.iconPath)) {
+      try {
+        const { nativeImage } = require('electron');
+        const img = nativeImage.createFromPath(pluginMeta.iconPath);
+        if (img && !img.isEmpty()) {
+          windowOptions.icon = img;
+        }
+      } catch {}
+    }
+
     const win = new BrowserWindow(windowOptions);
     // 标记实例信息
     try {
@@ -176,6 +187,7 @@ class WindowManager {
       url.searchParams.set('instanceId', instanceId);
       url.searchParams.set('name', pluginMeta.name || pluginMeta.id);
       url.searchParams.set('icon', pluginMeta.icon || '🔧');
+      try { if (pluginMeta.iconUrl) url.searchParams.set('iconUrl', pluginMeta.iconUrl); } catch {}
       url.searchParams.set('theme', this.defaultTheme);
       await view.webContents.loadURL(url.toString());
       // 存储引用

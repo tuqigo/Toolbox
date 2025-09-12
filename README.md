@@ -280,6 +280,39 @@ module.exports['demo.do'] = {
 };
 ```
 
+### 图标与 Logo 配置指南
+
+通过 `plugin.json` 的 `logo` 字段为插件设置图标。系统在不同位置的显示规则如下：
+
+- 列表（主输入框下的插件结果列表）
+  - 支持：Emoji/字符、SVG、PNG/JPG/GIF/ICO、`file://`、`data:`。
+  - 行为：若为图片，按缩略图容器自适应（contain），不会被拉伸变形。
+  - 推荐：SVG 或 64×64 PNG（透明背景），图形居中，适度留白。
+
+- 沙盒顶部栏（插件窗口标题左侧小图标）
+  - 支持：SVG、PNG/JPG/GIF/ICO。
+  - 行为：固定显示高度约 18px，按 contain 自适应。
+  - 推荐：SVG 或 64×64 PNG（透明背景）。
+
+- 任务栏/窗口图标（Windows）
+  - 支持：PNG/JPG/GIF/ICO（不支持 SVG）。
+  - 行为：当 `logo` 为位图/ICO 文件时，插件窗口将使用该文件作为任务栏图标；若为 SVG 则回退为默认图标。
+  - 推荐：256×256 或 128×128 PNG（透明背景），或多尺寸 ICO。
+
+配置示例：
+
+```json
+{
+  "name": "剪贴板历史",
+  "description": "查看剪贴板历史",
+  "logo": "icon.svg", // 列表与顶部栏渲染为图片
+  "window": { "width": 720, "height": 560, "resizable": true },
+  "features": [ /* ... */ ]
+}
+```
+
+若需在任务栏显示清晰图标，建议直接让 `logo` 指向位图/ICO（如 `icon.png` 或 `icon.ico`）。
+
 ## 插件 API（window.MT）
 
 - 运行环境：有 UI 插件使用 sandbox + contextIsolation（无 Node/Electron），通过 `window.MT` 访问能力；无 UI 功能处理器在主进程中按 feature 执行。

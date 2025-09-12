@@ -8,7 +8,8 @@
     .bar { height: 48px; display: flex; align-items: center; justify-content: space-between; background: #f9f9fb; border-bottom: 1px solid #ececf2; box-sizing: border-box; padding: 0 8px; -webkit-app-region: drag; }
     .left, .right { display:flex; align-items:center; gap:8px; -webkit-app-region: no-drag; }
     .title { font-size: 13px; color: #333; user-select: none; }
-    .icon { font-size: 14px; width: 18px; text-align: center; }
+    .icon { font-size: 14px; width: 18px; height: 18px; text-align: center; display:flex; align-items:center; justify-content:center; }
+    .icon img { width: 18px; height: 18px; object-fit: contain; display:block; }
     .btn { width: 32px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; cursor: pointer; border: none; background: transparent; transition: background-color .15s ease; }
     .btn:hover { background: rgba(0,0,0,0.06); }
     .btn:active { background: rgba(0,0,0,0.1); }
@@ -38,9 +39,19 @@
       const name = qs('name') || id;
       const instanceId = qs('instanceId') || 'default';
       const icon = qs('icon') || '🔧';
+      const iconUrl = qs('iconUrl');
       const isDev = qs('dev') === '1';
       document.getElementById('title').textContent = name;
-      document.getElementById('icon').textContent = icon;
+      const iconEl = document.getElementById('icon');
+      if (iconUrl) {
+        const img = document.createElement('img');
+        img.src = iconUrl;
+        img.alt = name;
+        iconEl.textContent = '';
+        iconEl.appendChild(img);
+      } else {
+        iconEl.textContent = icon;
+      }
 
       const pinEl = document.getElementById('tnPin');
       let pinned = false;

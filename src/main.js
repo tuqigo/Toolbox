@@ -27,6 +27,7 @@ const { PluginInstaller } = require('./core/pluginInstaller');
 const { IconManager } = require('./core/iconManager');
 const { DBStore } = require('./core/dbStore');
 const { FileLogger } = require('./utils/logger');
+const { pathToFileURL } = require('url');
 
 class MiniToolbox {
   constructor() {
@@ -215,6 +216,22 @@ class MiniToolbox {
     this.tray.on('click', () => {
       this.toggleInputWindow();
     });
+  }
+
+  // 解析插件图标为可用的 file:// URL（仅当 manifest.logo 指向文件时）
+  resolvePluginIconUrl(pluginMeta) {
+    try {
+      const icon = pluginMeta && pluginMeta.icon;
+      if (!icon || typeof icon !== 'string') return null;
+      if (icon.startsWith('data:') || icon.startsWith('file:') || icon.startsWith('http://') || icon.startsWith('https://')) {
+        return icon;
+      }
+      if (/\.(svg|png|jpg|jpeg|gif|ico)$/i.test(icon)) {
+        const abs = path.isAbsolute(icon) ? icon : path.join(pluginMeta.path, icon);
+        return pathToFileURL(abs).toString();
+      }
+      return null;
+    } catch { return null; }
   }
 
   getDataDir() {
@@ -945,6 +962,7 @@ class MiniToolbox {
               name: p.name,
               description: p.description,
               icon: p.icon,
+              iconUrl: this.resolvePluginIconUrl(p),
               ui: !!p.ui,
               instanceMode: p.instanceMode || 'single'
             }));
@@ -957,6 +975,7 @@ class MiniToolbox {
               name: p.name,
               description: p.description,
               icon: p.icon,
+              iconUrl: this.resolvePluginIconUrl(p),
               ui: !!p.ui,
               instanceMode: p.instanceMode || 'single'
             }));

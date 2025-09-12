@@ -1,7 +1,7 @@
 {
   "name": "Coohom 工具",
   "description": "Coohom 相关便捷工具集合（Base64/URL/JWT/查询等）",
-  "logo": "🔧",
+  "logo": "coohom.png",
   "features": [
     {
       "code": "obs.id",

@@ -2,6 +2,7 @@
 // 负责扫描 plugins 目录，解析 plugin.json/config.json，生成统一的插件元信息
 const path = require('path');
 const fs = require('fs-extra');
+const { pathToFileURL } = require('url');
 const { RuleCompiler } = require('./ruleCompiler');
 const { PluginIdManager } = require('./pluginIdManager');
 
@@ -92,12 +93,33 @@ class PluginManager {
       featuresMap[f.code] = effective;
     }
 
+    // 解析图标：兼容 emoji / URL / 相对路径文件（svg/png/...）
+    const rawIcon = manifest.logo || '';
+    let iconUrl = null;
+    let iconPathFs = null;
+    try {
+      if (typeof rawIcon === 'string' && rawIcon) {
+        if (/^(data:|file:|https?:)/i.test(rawIcon)) {
+          iconUrl = rawIcon;
+        } else if (/\.(svg|png|jpg|jpeg|gif|ico)$/i.test(rawIcon)) {
+          const abs = path.isAbsolute(rawIcon) ? rawIcon : path.join(pluginPath, rawIcon);
+          iconUrl = pathToFileURL(abs).toString();
+          // 仅为常见位图/ico暴露文件路径给 BrowserWindow.icon（Windows 任务栏图标）
+          if (/\.(png|jpg|jpeg|gif|ico)$/i.test(rawIcon)) {
+            iconPathFs = abs;
+          }
+        }
+      }
+    } catch {}
+
     const meta = {
       id,
       name,
       description,
       path: pluginPath,
-      icon: manifest.logo || '🔧',
+      icon: rawIcon || '🔧',
+      iconUrl: iconUrl || null,
+      iconPath: iconPathFs || null,
       window: windowCfg,
       // 单例/多实例：默认多实例
       instanceMode: (function(){

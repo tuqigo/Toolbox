@@ -144,6 +144,7 @@ class Matcher {
       name: r.meta.name,
       description: r.meta.description || '',
       icon: r.meta.icon || '🔧',
+      iconUrl: r.meta.iconUrl || null,
       score: r.score,
       matchedBy: r.matchedBy,
       hasUi: !!r.meta.ui,
