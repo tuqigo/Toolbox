@@ -26,6 +26,7 @@ const { ConfigStore } = require('./core/configStore');
 const { PluginInstaller } = require('./core/pluginInstaller');
 const { IconManager } = require('./core/iconManager');
 const { DBStore } = require('./core/dbStore');
+const { FileLogger } = require('./utils/logger');
 
 class MiniToolbox {
   constructor() {
@@ -52,6 +53,7 @@ class MiniToolbox {
     this.pluginInstaller = new PluginInstaller({ isQuiet: this.isQuiet });
     this.iconManager = new IconManager();
     this.devLoggingInitialized = false;
+    this.fileLogger = null;
 
     // SQLite 存储（延迟打开，按需使用）
     this.dbStore = new DBStore({
@@ -59,6 +61,11 @@ class MiniToolbox {
       maxKeysPerPlugin: 1000,
       maxValueBytes: 256 * 1024
     });
+
+    // 生产环境文件日志（尽早挂载，捕获启动期日志）
+    if (!this.isDev) {
+      try { this.setupProdLogging(); } catch {}
+    }
 
     // 剪贴板忽略相关
     this.ignoreNextClipboardChange = false;
@@ -212,6 +219,9 @@ class MiniToolbox {
 
   getDataDir() {
     try { return path.join(app.getPath('userData'), 'data'); } catch (e) { return path.join(app.getPath('userData'), 'data'); }
+  }
+  getLogsDir() {
+    try { return path.join(app.getPath('userData'), 'logs'); } catch (e) { return path.join(process.cwd(), 'logs'); }
   }
   async setTitlebarHeight(px) {
     try {
@@ -1644,6 +1654,9 @@ class MiniToolbox {
 
       if (!this.isQuiet) {
         console.log('MiniToolbox 启动成功');
+        if (!this.isDev) {
+          try { console.log('日志目录:', this.getLogsDir()); } catch {}
+        }
       }
     } catch (error) {
       console.error('应用启动失败:', error);
@@ -1682,6 +1695,44 @@ class MiniToolbox {
     app.on('browser-window-created', (_e, win) => {
       try { hookWebContents(win.webContents); } catch {}
     });
+  }
+
+  setupProdLogging() {
+    try {
+      const dir = this.getLogsDir();
+      this.fileLogger = new FileLogger({ dir, prefix: 'MiniToolbox', maxSizeBytes: 8 * 1024 * 1024 });
+      this.fileLogger.patchConsole();
+
+      const logErr = (...args) => { try { console.error('[FATAL]', ...args); } catch {} };
+      process.on('uncaughtException', (err) => logErr('uncaughtException', err && err.stack || err));
+      process.on('unhandledRejection', (reason) => logErr('unhandledRejection', reason));
+
+      app.on('render-process-gone', (_event, _webContents, details) => {
+        console.error('render-process-gone', details);
+      });
+
+      const hookWebContents = (wc) => {
+        try {
+          wc.on('console-message', (_e, level, message, line, sourceId) => {
+            const lvl = ['LOG','WARN','ERROR','INFO','DEBUG'][level] || level;
+            console.log(`[Renderer:${lvl}]`, message, sourceId ? `${sourceId}:${line}` : '');
+          });
+          wc.on('crashed', () => console.error('webContents crashed'));
+          wc.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+            console.error('did-fail-load', { errorCode, errorDescription, validatedURL, isMainFrame });
+          });
+        } catch {}
+      };
+
+      app.on('browser-window-created', (_e, win) => {
+        try { hookWebContents(win.webContents); } catch {}
+      });
+
+      console.log('生产日志已启用，目录:', dir);
+    } catch (e) {
+      // 仅在控制台输出，避免影响主流程
+      try { console.error('初始化生产日志失败:', e && e.message || e); } catch {}
+    }
   }
 
   // 检测屏幕信息并计算窗口尺寸（启动时调用一次）

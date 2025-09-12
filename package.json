@@ -12,7 +12,9 @@
     "build:win:portable": "electron-builder --win portable",
     "build:win:nsis": "electron-builder --win nsis",
     "pack:win": "electron-packager . MiniToolbox --platform=win32 --arch=x64 --out=dist --overwrite --asar --prune=true --ignore=\"^/(cache|docs|tools)\" --ignore=\"^/README\\.md$\"",
-    "pack:win:optimized": "electron-packager . MiniToolbox --platform=win32 --arch=x64 --out=dist --overwrite --asar --prune=true --ignore=\"^/(cache|docs|tools|build)\" --ignore=\"^/README\\.md$\" --ignore=\"^/\\.git\" --ignore=\"^/\\.vscode\""
+    "pack:win:optimized": "electron-packager . MiniToolbox --platform=win32 --arch=x64 --out=dist --overwrite --asar --prune=true --ignore=\"^/(cache|docs|tools|build)\" --ignore=\"^/README\\.md$\" --ignore=\"^/\\.git\" --ignore=\"^/\\.vscode\"",
+    "postinstall": "electron-builder install-app-deps",
+    "rebuild:native": "electron-builder install-app-deps"
   },
   "keywords": [
     "electron",
@@ -77,7 +79,9 @@
       "node_modules/safe-buffer/**/*",
       "node_modules/string_decoder/**/*",
       "node_modules/util-deprecate/**/*",
-      "node_modules/better-sqlite3/**/*"
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/bindings/**/*",
+      "node_modules/file-uri-to-path/**/*"
     ],
     "extraResources": [],
     "win": {

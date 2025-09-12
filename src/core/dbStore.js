@@ -1,12 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-let Database;
-try {
-  Database = require('better-sqlite3');
-} catch (e) {
-  throw new Error('better-sqlite3 未安装，请执行: npm i better-sqlite3');
-}
+let Database; // 延迟加载 better-sqlite3，避免在打包环境中过早 require 失败
 
 class DBStore {
   constructor(options = {}) {
@@ -26,9 +21,29 @@ class DBStore {
   open() {
     if (this.isOpen) return;
     this.ensureDir();
+    // 延迟 require，提供更友好的错误与打包提示
+    if (!Database) {
+      try {
+        Database = require('better-sqlite3');
+      } catch (e) {
+        const hint = [
+          'better-sqlite3 加载失败。',
+          '请检查：',
+          '1) 已执行: npm run postinstall 或 electron-builder install-app-deps 以重建原生模块',
+          '2) package.json build.files 中包含 node_modules/bindings/**/*（better-sqlite3 运行时依赖）',
+          '3) build.asarUnpack 包含 **/*.node 以及 node_modules/better-sqlite3/**',
+          `原始错误: ${e && e.message || e}`
+        ].join('\n');
+        try { console.error(hint); } catch {}
+        throw new Error(hint);
+      }
+    }
+
     this.db = new Database(this.dbPath, { fileMustExist: false });
     try { this.db.pragma('journal_mode = WAL'); } catch {}
     try { this.db.pragma('synchronous = NORMAL'); } catch {}
+
+    try { console.log('[DBStore] 打开数据库:', this.dbPath); } catch {}
 
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS kv (
