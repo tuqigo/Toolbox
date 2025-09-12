@@ -47,8 +47,7 @@
     "asar": true,
     "asarUnpack": [
       "plugins/**/*",
-      "**/*.node",
-      "node_modules/better-sqlite3/**"
+      "node_modules/better-sqlite3/build/Release/*.node"
     ],
     "files": [
       "src/**/*",
@@ -79,11 +78,15 @@
       "node_modules/safe-buffer/**/*",
       "node_modules/string_decoder/**/*",
       "node_modules/util-deprecate/**/*",
-      "node_modules/better-sqlite3/**/*",
+      "node_modules/better-sqlite3/package.json",
+      "node_modules/better-sqlite3/lib/**/*",
+      "node_modules/better-sqlite3/build/Release/*.node",
       "node_modules/bindings/**/*",
       "node_modules/file-uri-to-path/**/*"
     ],
     "extraResources": [],
+    "electronLanguages": ["en-US", "zh-CN"],
+    "afterPack": "tools/afterPack.js",
     "win": {
       "target": [
         {
