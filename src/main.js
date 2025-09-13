@@ -45,12 +45,25 @@ class MiniToolbox {
     
     // 新核心
     this.configStore = new ConfigStore({ isQuiet: this.isQuiet });
-    // 同时扫描内置与用户目录插件
+    // 同时扫描内置与用户目录插件（兼容开发/打包路径）
     let userPluginsDir = null;
     try { userPluginsDir = path.join(app.getPath('userData'), 'plugins'); } catch {}
-    const builtinPluginsDir = path.join(__dirname, '../plugins');
-    const scanDirs = [builtinPluginsDir];
+    const devBuiltinDir = path.join(__dirname, '../plugins');
+    let packagedUnpackedDir = null;
+    let packagedDir = null;
+    try {
+      if (process.resourcesPath) {
+        packagedUnpackedDir = path.join(process.resourcesPath, 'app.asar.unpacked', 'plugins');
+        packagedDir = path.join(process.resourcesPath, 'plugins');
+      }
+    } catch {}
+    const scanDirs = [devBuiltinDir];
+    if (packagedUnpackedDir) scanDirs.push(packagedUnpackedDir);
+    if (packagedDir) scanDirs.push(packagedDir);
     if (userPluginsDir) scanDirs.push(userPluginsDir);
+    if (!this.isQuiet) {
+      try { console.log('[MiniToolbox] 插件扫描目录:', scanDirs); } catch {}
+    }
     this.pluginManager = new PluginManager({ isQuiet: this.isQuiet, pluginsDir: scanDirs });
     this.inputAnalyzer = new InputAnalyzer({ isQuiet: this.isQuiet });
     this.windowManager = new WindowManager({ isQuiet: this.isQuiet, isDev: this.isDev });

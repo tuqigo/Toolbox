@@ -1,0 +1,19 @@
+{
+  "name": "OCR识别",
+  "description": "离线,打开即识别",
+  "logo": "🧾",
+  "instance": "multi",
+  "window": { "width": 1000, "height": 700, "resizable": true, "hideOnBlur": false },
+  "features": [
+    {
+      "code": "ocr.umi",
+      "explain": "识别图片文字",
+      "cmds": [
+        { "type": "files", "fileType": "image" },
+        { "type": "regex", "match": "^\\[CLIPBOARD-IMAGE\\]" }
+      ]
+    }
+  ]
+}
+
+

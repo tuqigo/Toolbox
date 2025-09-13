@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>OCR 识别（Umi-OCR）</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: file:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';">
+  <style>
+    html, body { margin:0; padding:0; height:100%; font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial; }
+    .wrap { position:absolute; inset:48px 0 0 0; display:flex; gap:8px; padding:8px; box-sizing:border-box; }
+    .col { flex:1; display:flex; flex-direction:column; border:1px solid var(--mt-border,#e5e7eb); border-radius:8px; overflow:hidden; background:var(--mt-panel,#fff); }
+    .col h3 { margin:0; padding:8px 12px; border-bottom:1px solid var(--mt-border,#e5e7eb); font-size:13px; color:var(--mt-fg,#222); }
+    .viewer { flex:1; display:flex; align-items:center; justify-content:center; background:#0b0d10; }
+    .viewer img { max-width:100%; max-height:100%; object-fit:contain; }
+    .tools { padding:8px; display:flex; gap:8px; border-top:1px solid var(--mt-border,#e5e7eb); }
+    .tools button { font-size:12px; padding:6px 10px; cursor:pointer; }
+    .text { flex:1; padding:8px; overflow:auto; white-space:pre-wrap; word-break:break-word; color:var(--mt-fg,#222); }
+    .status { padding:6px 10px; font-size:12px; color:#666; }
+    .error { color:#dc3545; }
+  </style>
+  <script>
+    const api = window.MT;
+    let lastInput = null; // { type: 'file'|'dataUrl', value: string }
+    let running = false;
+
+    function setStatus(msg, isError=false) {
+      try {
+        const el = document.getElementById('status');
+        if (!el) return;
+        el.textContent = msg || '';
+        el.className = 'status' + (isError ? ' error' : '');
+      } catch {}
+    }
+    function setImage(src) {
+      try { const img = document.getElementById('preview'); if (img) img.src = src || ''; } catch {}
+    }
+    function setText(t) {
+      try { const el = document.getElementById('result'); if (el) el.textContent = t || ''; } catch {}
+    }
+    function toFileUrl(p) { return 'file:///' + String(p||'').replace(/\\/g,'/').replace(/^\/+/, ''); }
+
+    // RapidOCR 不需要 Umi-OCR 的 CLI 选项，保持空数组或不传入
+
+    async function doOCR() {
+      if (!lastInput || running) return;
+      running = true;
+      setStatus('识别中...', false);
+      setText('');
+
+      try {
+        const payload = lastInput.type === 'file'
+          ? { sourceType: 'file', path: lastInput.value }
+          : { sourceType: 'dataUrl', dataUrl: lastInput.value };
+
+        const data = await api.invoke('ocr.rapid', payload);
+        const text = (data && data.text) || '';
+        setText(text || '(未识别到文字)');
+        setStatus('完成');
+      } catch (e) {
+        setStatus('识别异常：' + (e && e.message || e), true);
+      } finally { running = false; }
+    }
+
+    function bindUI() {
+      try {
+        const btnRe = document.getElementById('btnReOcr');
+        const btnCopy = document.getElementById('btnCopy');
+        const btnOpen = document.getElementById('btnOpen');
+        if (btnRe) btnRe.addEventListener('click', doOCR);
+        if (btnCopy) btnCopy.addEventListener('click', async () => {
+          const t = (document.getElementById('result')||{}).textContent || '';
+          await api.invoke('clipboard.writeText', t);
+          setStatus('已复制');
+        });
+        if (btnOpen) btnOpen.addEventListener('click', async () => {
+          if (lastInput && lastInput.type === 'file') {
+            await api.invoke('openExternal', toFileUrl(lastInput.value));
+          }
+        });
+      } catch {}
+    }
+
+    // 通过受限 API 注册输入事件（插件预加载会把 IPC 转发到此回调）
+    if (api && typeof api.onInput === 'function') {
+      api.onInput((d) => {
+        try {
+          const raw = String((d && d.content) || '');
+          if (raw.startsWith('[CLIPBOARD-IMAGE]')) {
+            const dataUrl = raw.replace('[CLIPBOARD-IMAGE]', '');
+            lastInput = { type: 'dataUrl', value: dataUrl };
+            setImage(dataUrl);
+          } else if (raw) {
+            lastInput = { type: 'file', value: raw };
+            setImage(toFileUrl(raw));
+          } else {
+            setStatus('未收到输入', true);
+            return;
+          }
+          setStatus('识别中...');
+          doOCR();
+        } catch (e) {
+          setStatus('处理输入异常：' + (e && e.message || e), true);
+        }
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', bindUI);
+  </script>
+  
+</head>
+<body>
+  <div class="wrap">
+    <div class="col">
+      <h3>图片预览</h3>
+      <div class="viewer"><img id="preview" alt="preview"/></div>
+      <div class="tools">
+        <button id="btnReOcr">重新识别</button>
+        <button id="btnOpen">在外部打开</button>
+      </div>
+    </div>
+    <div class="col">
+      <h3>识别结果</h3>
+      <div class="text" id="result"></div>
+      <div class="tools">
+        <span class="status" id="status">等待输入...</span>
+        <button id="btnCopy">复制全部</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+
+
