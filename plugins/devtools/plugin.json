@@ -1,0 +1,29 @@
+{
+  "name": "开发者工具",
+  "description": "本地挂载/运行插件，暂停与打包 .mtpkg",
+  "version": "1.0.0",
+  "author": "MiniToolbox Team",
+  "logo": "🧰",
+  "instance": "single",
+  "window": {
+    "width": 840,
+    "height": 620,
+    "resizable": true,
+    "minWidth": 760,
+    "minHeight": 560
+  },
+  "features": [
+    {
+      "code": "devtools.open",
+      "explain": "打开开发者工具",
+      "cmds": [
+        { "type": "keyword", "value": "dev" },
+        { "type": "keyword", "value": "开发者工具" },
+        { "type": "keyword", "value": "devtools" },
+        { "type": "keyword", "value": "插件开发" }
+      ]
+    }
+  ]
+}
+
+

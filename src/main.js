@@ -45,7 +45,13 @@ class MiniToolbox {
     
     // 新核心
     this.configStore = new ConfigStore({ isQuiet: this.isQuiet });
-    this.pluginManager = new PluginManager({ isQuiet: this.isQuiet });
+    // 同时扫描内置与用户目录插件
+    let userPluginsDir = null;
+    try { userPluginsDir = path.join(app.getPath('userData'), 'plugins'); } catch {}
+    const builtinPluginsDir = path.join(__dirname, '../plugins');
+    const scanDirs = [builtinPluginsDir];
+    if (userPluginsDir) scanDirs.push(userPluginsDir);
+    this.pluginManager = new PluginManager({ isQuiet: this.isQuiet, pluginsDir: scanDirs });
     this.inputAnalyzer = new InputAnalyzer({ isQuiet: this.isQuiet });
     this.windowManager = new WindowManager({ isQuiet: this.isQuiet, isDev: this.isDev });
     this.clipboardStore = new ClipboardStore({ isQuiet: this.isQuiet, maxItems: 500 });
@@ -1033,8 +1039,120 @@ class MiniToolbox {
           case 'installer.checkUpdates':
             return { ok: true, data: await this.pluginInstaller.checkUpdates() };
           case 'installer.installFromFile':
-            await this.pluginInstaller.installFromFile(payload);
-            return { ok: true };
+            // payload: 期望为文件路径字符串；若为空则弹出对话框选择
+            try {
+              let filePath = payload;
+              if (!filePath) {
+                const ret = await dialog.showOpenDialog({
+                  title: '选择插件包 (.mtpkg)',
+                  properties: ['openFile'],
+                  filters: [{ name: 'MiniToolbox Package', extensions: ['mtpkg'] }]
+                });
+                if (ret.canceled || !ret.filePaths || ret.filePaths.length === 0) {
+                  return { ok: false, error: 'cancelled' };
+                }
+                filePath = ret.filePaths[0];
+              }
+              await this.pluginInstaller.installFromFile(filePath);
+              return { ok: true };
+            } catch (e) {
+              return { ok: false, error: e && e.message || String(e) };
+            }
+            
+          // 开发者工具：选择本地目录中的 plugin.json 并挂载/运行
+          case 'devtools.pickAndMount': {
+            try {
+              const ret = await dialog.showOpenDialog({
+                title: '选择插件清单 plugin.json',
+                properties: ['openFile'],
+                filters: [{ name: 'Plugin Manifest', extensions: ['json'] }]
+              });
+              if (ret.canceled || !ret.filePaths || ret.filePaths.length === 0) return { ok: false, error: 'cancelled' };
+              const manifestPath = ret.filePaths[0];
+              if (!manifestPath.toLowerCase().endsWith('plugin.json')) return { ok: false, error: '请选择 plugin.json' };
+              const pluginDir = path.dirname(manifestPath);
+              const meta = await this.pluginManager.mountDevPlugin(pluginDir);
+              await this.matcher.rebuild(this.pluginManager.list());
+              return { ok: true, data: { id: meta && meta.id, path: pluginDir, name: meta && meta.name } };
+            } catch (e) {
+              return { ok: false, error: e && e.message || String(e) };
+            }
+          }
+
+          // 开发者工具：仅选择 plugin.json（不挂载）
+          case 'devtools.pickManifest': {
+            try {
+              const ret = await dialog.showOpenDialog({
+                title: '选择插件清单 plugin.json',
+                properties: ['openFile'],
+                filters: [{ name: 'Plugin Manifest', extensions: ['json'] }]
+              });
+              if (ret.canceled || !ret.filePaths || ret.filePaths.length === 0) return { ok: false, error: 'cancelled' };
+              const manifestPath = ret.filePaths[0];
+              if (!manifestPath.toLowerCase().endsWith('plugin.json')) return { ok: false, error: '请选择 plugin.json' };
+              const pluginDir = path.dirname(manifestPath);
+              // 做一次轻量校验
+              try {
+                const raw = await fs.readJson(manifestPath);
+                const requiredOk = raw && raw.name;
+                if (!requiredOk) return { ok: false, error: 'plugin.json 缺少 name 字段' };
+              } catch (e) {
+                return { ok: false, error: '读取 plugin.json 失败: ' + (e && e.message) };
+              }
+              return { ok: true, data: { path: pluginDir, manifestPath } };
+            } catch (e) {
+              return { ok: false, error: e && e.message || String(e) };
+            }
+          }
+
+          // 开发者工具：按指定目录挂载
+          case 'devtools.mountPath': {
+            try {
+              const { dir } = payload || {};
+              if (!dir) return { ok: false, error: 'invalid dir' };
+              const meta = await this.pluginManager.mountDevPlugin(String(dir));
+              await this.matcher.rebuild(this.pluginManager.list());
+              return { ok: true, data: { id: meta && meta.id, name: meta && meta.name } };
+            } catch (e) {
+              return { ok: false, error: e && e.message || String(e) };
+            }
+          }
+
+          // 开发者工具：卸载（暂停）指定插件ID
+          case 'devtools.unmount': {
+            try {
+              const { id } = payload || {};
+              if (!id) return { ok: false, error: 'invalid id' };
+              const ok = await this.pluginManager.unmountById(String(id));
+              await this.matcher.rebuild(this.pluginManager.list());
+              return { ok: true, data: ok };
+            } catch (e) {
+              return { ok: false, error: e && e.message || String(e) };
+            }
+          }
+
+          // 开发者工具：打包当前目录为 .mtpkg（调用现有工具逻辑）
+          case 'devtools.pack': {
+            try {
+              const PluginPackager = require('../tools/plugin-packager');
+              const packager = new PluginPackager();
+              let { pluginDir, outputDir } = payload || {};
+              if (!pluginDir) {
+                const pick = await dialog.showOpenDialog({ title: '选择插件目录', properties: ['openDirectory'] });
+                if (pick.canceled || !pick.filePaths || pick.filePaths.length === 0) return { ok: false, error: 'cancelled' };
+                pluginDir = pick.filePaths[0];
+              }
+              if (!outputDir) {
+                const save = await dialog.showOpenDialog({ title: '选择输出目录', properties: ['openDirectory', 'createDirectory'] });
+                if (save.canceled || !save.filePaths || save.filePaths.length === 0) return { ok: false, error: 'cancelled' };
+                outputDir = save.filePaths[0];
+              }
+              const success = await packager.packPlugin(pluginDir, outputDir);
+              return { ok: !!success };
+            } catch (e) {
+              return { ok: false, error: e && e.message || String(e) };
+            }
+          }
           case 'config.get':
             try {
               const result = payload ? this.configStore.get(payload) : this.configStore.exportConfig();

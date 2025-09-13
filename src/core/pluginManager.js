@@ -8,7 +8,10 @@ const { PluginIdManager } = require('./pluginIdManager');
 
 class PluginManager {
   constructor(options = {}) {
-    this.pluginsDir = options.pluginsDir || path.join(__dirname, '../../plugins');
+    const defaultDir = path.join(__dirname, '../../plugins');
+    const opt = options.pluginsDir;
+    // 兼容单目录与多目录入参：内置目录优先，后续目录可覆盖同名插件
+    this.pluginsDirs = Array.isArray(opt) ? (opt.length ? opt : [defaultDir]) : [opt || defaultDir];
     this.isQuiet = !!options.isQuiet;
     this.plugins = new Map(); // id -> plugin meta
     this.ruleCompiler = new RuleCompiler({ isQuiet: this.isQuiet });
@@ -17,20 +20,27 @@ class PluginManager {
 
   async loadAll() {
     this.plugins.clear();
-    try {
-      const entries = await fs.readdir(this.pluginsDir);
-      for (const entry of entries) {
-        const dir = path.join(this.pluginsDir, entry);
-        if ((await fs.stat(dir)).isDirectory()) {
-          await this.loadOne(dir).catch(e => {
-            if (!this.isQuiet) console.error('加载插件失败:', dir, e.message);
-          });
+    for (const baseDir of this.pluginsDirs) {
+      try {
+        if (!await fs.pathExists(baseDir)) {
+          if (!this.isQuiet) console.warn('[PluginManager] 插件目录不存在:', baseDir);
+          continue;
         }
+        const entries = await fs.readdir(baseDir);
+        for (const entry of entries) {
+          const dir = path.join(baseDir, entry);
+          if ((await fs.stat(dir)).isDirectory()) {
+            await this.loadOne(dir).catch(e => {
+              if (!this.isQuiet) console.error('加载插件失败:', dir, e.message);
+            });
+          }
+        }
+        if (!this.isQuiet) console.log('[PluginManager] 扫描完成:', baseDir);
+      } catch (e) {
+        if (!this.isQuiet) console.error('[PluginManager] 扫描插件目录失败:', baseDir, e.message);
       }
-      if (!this.isQuiet) console.log(`已加载 ${this.plugins.size} 个插件`);
-    } catch (e) {
-      if (!this.isQuiet) console.error('扫描插件目录失败:', e.message);
     }
+    if (!this.isQuiet) console.log(`已加载 ${this.plugins.size} 个插件`);
   }
 
   async loadOne(pluginPath) {
@@ -162,6 +172,34 @@ class PluginManager {
 
   get(id) {
     return this.plugins.get(id);
+  }
+
+  // 开发者工具：挂载任意目录插件（临时）
+  async mountDevPlugin(pluginPath) {
+    try {
+      if (!await fs.pathExists(pluginPath)) throw new Error('路径不存在');
+      await this.loadOne(pluginPath);
+      const meta = Array.from(this.plugins.values()).find(p => p.path === pluginPath);
+      if (!this.isQuiet) console.log('[PluginManager] 开发挂载:', pluginPath, '=>', meta && meta.id);
+      return meta || null;
+    } catch (e) {
+      if (!this.isQuiet) console.error('[PluginManager] 开发挂载失败:', pluginPath, e && e.message || e);
+      throw e;
+    }
+  }
+
+  // 开发者工具：按ID卸载（仅从运行时移除，不删除磁盘）
+  async unmountById(id) {
+    try {
+      if (!this.plugins.has(id)) return false;
+      const meta = this.plugins.get(id);
+      this.plugins.delete(id);
+      if (!this.isQuiet) console.log('[PluginManager] 开发卸载:', id, 'path=', meta && meta.path);
+      return true;
+    } catch (e) {
+      if (!this.isQuiet) console.error('[PluginManager] 开发卸载失败:', id, e && e.message || e);
+      throw e;
+    }
   }
 }
 

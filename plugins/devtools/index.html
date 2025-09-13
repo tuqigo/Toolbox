@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; img-src 'self' data:; style-src 'self' 'unsafe-inline';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>开发者工具</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f7f7f9; margin: 0; }
+    .container { padding: 16px 20px; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    .row { display: flex; gap: 12px; align-items: center; }
+    .col { flex: 1; }
+    .input { width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+    .btn { padding: 8px 12px; border: 1px solid #d1d5db; background: #fff; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    .btn.primary { background: #007aff; color: #fff; border-color: #007aff; }
+    .muted { color: #6b7280; font-size: 12px; }
+    .list { margin-top: 8px; }
+    .item { display: flex; justify-content: space-between; padding: 8px 6px; border-bottom: 1px dashed #e5e7eb; font-size: 13px; }
+    .badge { background: #eef2ff; color: #3730a3; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  </style>
+  <script defer src="script.js"></script>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="row">
+        <div class="col">
+          <div class="muted">选择本地插件 plugin.json 所在目录并挂载运行</div>
+        </div>
+        <div>
+          <button class="btn" id="pickBtn">选择 plugin.json</button>
+          <button class="btn primary" id="mountBtn">挂载运行</button>
+          <button class="btn" id="installFileBtn">从文件安装 (.mtpkg)</button>
+        </div>
+      </div>
+      <div class="list" id="mountedList"></div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div class="col">
+          <div class="muted">暂停/卸载已挂载的开发插件</div>
+        </div>
+        <div>
+          <button class="btn" id="refreshBtn">刷新列表</button>
+        </div>
+      </div>
+      <div class="list" id="runningList"></div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div class="col">
+          <div class="muted">打包为 .mtpkg 分发</div>
+        </div>
+        <div>
+          <button class="btn" id="packBtn">选择目录并打包</button>
+        </div>
+      </div>
+      <div class="muted" id="packMsg" style="margin-top:8px"></div>
+    </div>
+  </div>
+</body>
+</html>
+
+

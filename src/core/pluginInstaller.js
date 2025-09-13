@@ -202,33 +202,50 @@ class PluginInstaller extends EventEmitter {
         throw new Error('无效的插件包：缺少 plugin.json');
       }
       
-      const manifest = await fs.readJson(manifestPath);
-      const pluginId = manifest.id;
-      
-      if (!pluginId) {
-        throw new Error('插件清单中缺少 id 字段');
+      const rawManifest = await fs.readJson(manifestPath);
+      // 规范化清单并进行基本校验（name、version 等）
+      const manifest = this.idManager.normalizeManifest(rawManifest);
+      const version = manifest.version || '1.0.0';
+
+      // 优先从包文件名解析 packageId（与打包器一致：<packageId>-<version>.mtpkg）
+      const base = path.basename(packagePath, path.extname(packagePath));
+      let packageId = '';
+      const idx = base.lastIndexOf('-');
+      if (idx > 0) {
+        const verPart = base.substring(idx + 1);
+        const idPart = base.substring(0, idx);
+        if (/^\d+\.\d+\.\d+$/.test(verPart)) {
+          packageId = idPart; // e.g. json-formatter-abcdef12
+        }
       }
 
-      // 检查是否已安装
-      if (await this.isPluginInstalled(pluginId)) {
-        throw new Error(`插件 ${pluginId} 已安装`);
+      // 若文件名无法解析，则根据 manifest.name 生成稳定 ID：<slug>-<hash>
+      if (!packageId) {
+        const nameSlug = String(manifest.name || 'plugin').replace(/[^a-zA-Z0-9-]+/g, '-').toLowerCase().replace(/^-+|-+$/g, '');
+        const contentHash = this.idManager.generateContentHash(manifest);
+        packageId = `${nameSlug}-${contentHash}`;
+      }
+
+      // 检查是否已安装（按最终目录名判断）
+      const finalPath = path.join(this.pluginsDir, packageId);
+      if (await fs.pathExists(finalPath)) {
+        throw new Error(`插件已安装: ${packageId}`);
       }
 
       // 移动到正式安装目录
-      const finalPath = path.join(this.pluginsDir, pluginId);
       await fs.move(tempExtractPath, finalPath);
 
       // 写入安装信息
-      await this.writeInstallInfo(pluginId, {
+      await this.writeInstallInfo(packageId, {
         source: 'file',
-        pluginId,
-        version: manifest.version || '1.0.0',
+        packageId,
+        version: version,
         installedAt: new Date().toISOString(),
         originalFile: path.basename(packagePath)
       });
 
-      this.emit('install-success', { pluginId, version: manifest.version });
-      this.log(`✅ 插件 ${pluginId} 从文件安装成功`);
+      this.emit('install-success', { pluginId: packageId, version: version });
+      this.log(`✅ 插件 ${packageId} 从文件安装成功`);
       return true;
 
     } catch (error) {
