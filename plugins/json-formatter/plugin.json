@@ -1,0 +1,32 @@
+{
+  "name": "JSON 格式化",
+  "description": "格式化与校验 JSON，支持复制",
+  "logo": "🔧",
+  "instance": "multi",
+  "window": {
+    "hideOnBlur": false,
+    "width": 800,
+    "height": 700,
+    "resizable": true
+  },
+  "features": [
+    {
+      "code": "json.format",
+      "explain": "格式化 JSON",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "json"
+        },
+        {
+          "type": "keyword",
+          "value": "JSON"
+        },
+        {
+          "type": "regex",
+          "match": "/^\\s*[\\{\\[][\\s\\S]*[\\}\\]]\\s*$/"
+        }
+      ]
+    }
+  ]
+}

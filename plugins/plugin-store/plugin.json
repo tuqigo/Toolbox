@@ -1,0 +1,47 @@
+{
+  "name": "插件商店",
+  "description": "浏览、搜索、安装和管理插件",
+  "version": "1.0.0",
+  "author": "MiniToolbox Team",
+  "logo": "🏪",
+  "instance": "single",
+  "window": {
+    "width": 1000,
+    "height": 700,
+    "resizable": true,
+    "minWidth": 800,
+    "minHeight": 600
+  },
+  "features": [
+    {
+      "code": "store.open",
+      "explain": "打开插件商店",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "store"
+        },
+        {
+          "type": "keyword",
+          "value": "商店"
+        },
+        {
+          "type": "keyword",
+          "value": "插件商店"
+        },
+        {
+          "type": "keyword",
+          "value": "plugins"
+        },
+        {
+          "type": "keyword",
+          "value": "插件管理"
+        },
+        {
+          "type": "keyword",
+          "value": "插件"
+        }
+      ]
+    }
+  ]
+}

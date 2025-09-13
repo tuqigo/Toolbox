@@ -31,8 +31,6 @@ alwaysApply: true
 - `src/plugin-api/api.js`: 兼容层，将 `MiniToolboxAPI/MTAPI` 指向 `window.MT`。
 - `src/preload/plugin-preload.js`: 通过 `contextBridge` 暴露 `window.MT`。
 - `src/renderer/*`: 主输入框 UI 与结果列表、与主进程 IPC。
-- `plugins/*`: 官方内置插件示例（`plugin.json` + `index.html`/`script.js`）。
-- `docs/PLUGIN_DEVELOPMENT.md`: 插件开发与 API 用法详解。
 
 ## 插件开发要点
 - 目录要求：`plugin.json` 必须；UI 插件需 `index.html`；无 UI 插件用 `script.js`。
@@ -43,7 +41,7 @@ alwaysApply: true
   - `handleSelect(action, itemData, callbackSetList)`
   - `callbackSetList([{ title, description, data }])` 返回结果列表。
 - 可通过 `action.redirect('plugin-code', 'input')` 跳转至其他插件。
-- 你修改的代码需要详细的日志,需要做到看日志能理解你的代码意图
+- 你修改的代码必要时需要详细的日志,需要做到看日志能理解你的代码意图
 
 ## IPC 与受限 API（window.MT）
 - 统一入口：`await window.MT.invoke('mt.secure-call', { channel, payload })`
@@ -63,7 +61,6 @@ alwaysApply: true
 ## 常用命令
 - 开发：`npm run dev`
 - 便携版：`npm run build:win:portable`
-- 安装版：`npm run build:win:nsis`
 
 ## 回答策略（AI）
 - 优先引用本仓代码与路径（`src/core/...`、`plugins/...`）；必要时给最小可行示例。

@@ -1,0 +1,21 @@
+{
+  "name": "Mermaid 图表查看器",
+  "description": "渲染和显示Mermaid语法图表",
+  "logo": "🔧",
+  "window": { 
+    "width": 1000, 
+    "height": 700, 
+    "resizable": true 
+  },
+  "features": [
+    {
+      "code": "mermaid.sequence",
+      "explain": "渲染Mermaid",
+      "cmds": [
+        { "type": "keyword", "value": "liuchengtu", "label": "sequ 关键字" },
+        { "type": "regex", "match": "^(?:\\s*```mermaid\\b[\\s\\S]*?```|\\s*(?:graph\\b|flowchart\\b|sequenceDiagram\\b|classDiagram\\b|stateDiagram(?:-v2)?\\b|gantt\\b|pie\\b|journey\\b|erDiagram\\b|gitGraph\\b|timeline\\b|mindmap\\b|requirementDiagram\\b|quadrantChart\\b|sankey\\b|gitgraph\\b|packet-beta\\b|architecture-beta\\b|block-beta\\b|radar-beta\\b)[\\s\\S]*)$"
+, "label": "Mermaid 语法" }
+      ]
+    }
+  ]
+}
