@@ -1077,8 +1077,165 @@ class MiniToolbox {
               this.updateTrayMenu();
             }
             return { ok: result };
-          default:
+          case 'ocr.rapid': {
+            try {
+              const { sourceType, path: imagePath, dataUrl, timeoutMs, args } = payload || {};
+              const fs = require('fs-extra');
+              const path = require('path');
+              const { spawn } = require('child_process');
+
+              // 1) 定位可执行（优先插件自身 RapidOCR/RapidOCR-json.exe）
+              let exeCandidates = [];
+              try {
+                const pid = getPluginIdFromEvent(event);
+                const meta = pid && this.pluginManager.get(pid);
+                if (meta && meta.path) {
+                  exeCandidates.push(path.join(meta.path, 'RapidOCR', 'RapidOCR-json.exe'));
+                  exeCandidates.push(path.join(meta.path, 'vendor', 'rapidorc', 'RapidOCR-json.exe'));
+                }
+              } catch {}
+              try { exeCandidates.push(path.join(process.cwd(), 'RapidOCR', 'RapidOCR-json.exe')); } catch {}
+              try { if (process.resourcesPath) exeCandidates.push(path.join(process.resourcesPath, 'RapidOCR', 'RapidOCR-json.exe')); } catch {}
+
+              let exe = null;
+              for (const c of exeCandidates) { try { if (c && await fs.pathExists(c)) { exe = c; break; } } catch {} }
+              if (!exe) return { ok: false, error: '未找到 RapidOCR-json.exe（请放置于 插件目录/RapidOCR/ 下）\n候选: ' + exeCandidates.join(' | ') };
+
+              const cwd = path.dirname(exe);
+
+              // 2) 准备输入图片
+              let imgPath = '';
+              let tmpFile = null;
+              if (sourceType === 'file' && imagePath) {
+                imgPath = String(imagePath);
+              } else if (sourceType === 'dataUrl' && dataUrl) {
+                const base64 = String(dataUrl).replace(/^data:image\/\w+;base64,/, '');
+                const buf = Buffer.from(base64, 'base64');
+                const tmpDir = path.join(this.getDataDir(), 'rapidocr-temp');
+                await fs.ensureDir(tmpDir);
+                tmpFile = path.join(tmpDir, `clip_${Date.now()}.png`);
+                await fs.writeFile(tmpFile, buf);
+                imgPath = tmpFile;
+              } else {
+                return { ok: false, error: '无效的 OCR 入参' };
+              }
+
+              // 3) 解析模型目录与文件（中文 v4 优先，自动降级）
+              const modelsCandidates = [
+                path.join(cwd, 'models'),
+                path.join(path.dirname(cwd), 'models')
+              ];
+              let modelsDir = null;
+              for (const m of modelsCandidates) { try { if (await fs.pathExists(m)) { modelsDir = m; break; } } catch {} }
+              if (!modelsDir) return { ok: false, error: '未找到 RapidOCR 模型目录（需有 models/）' };
+
+              const pickFirstExisting = async (cands) => {
+                for (const f of cands) { const p = path.join(modelsDir, f); try { if (await fs.pathExists(p)) return f; } catch {} }
+                return null;
+              };
+
+              const detFile = await pickFirstExisting(['ch_PP-OCRv4_det_infer.onnx','ch_PP-OCRv3_det_infer.onnx']);
+              const clsFile = await pickFirstExisting(['ch_ppocr_mobile_v2.0_cls_infer.onnx']);
+              const recFile = await pickFirstExisting(['ch_PP-OCRv4_rec_infer.onnx','rec_ch_PP-OCRv4_infer.onnx','ch_PP-OCRv3_rec_infer.onnx','rec_ch_PP-OCRv3_infer.onnx']);
+              const keysFile = await pickFirstExisting(['dict_chinese.txt','ppocr_keys_v1.txt']);
+
+              if (!detFile || !clsFile || !recFile || !keysFile) {
+                return { ok: false, error: '模型文件缺失（det/cls/rec/keys），请参考 cmd.txt 放置中文模型' };
+              }
+
+              // 4) 组装参数：--models <dir> + basenames + --image <path>
+              const baseArgs = Array.isArray(args) ? args.slice() : [];
+              const finalArgs = [
+                '--models', modelsDir,
+                '--det', detFile,
+                '--cls', clsFile,
+                '--rec', recFile,
+                '--keys', keysFile,
+                '--image', imgPath
+              ];
+              // 将调用方透传 args 追加在末尾，允许覆盖细节
+              if (baseArgs.length > 0) finalArgs.push(...baseArgs);
+
+              if (!this.isQuiet) console.log('[OCR-RAPID] exec:', exe, finalArgs, 'cwd=', cwd);
+
+              // 5) 执行并解析 stdout(JSON)
+              const run = () => new Promise((resolveRun) => {
+                const p = spawn(exe, finalArgs, { cwd, windowsHide: true });
+                let out = '', err = '';
+                p.stdout.on('data', d => { const s = d.toString(); out += s; try { if (!this.isQuiet) console.log('[OCR-RAPID][stdout]', s.substring(0, 200)); } catch {} });
+                p.stderr.on('data', d => { const s = d.toString(); err += s; try { if (!this.isQuiet) console.warn('[OCR-RAPID][stderr]', s.substring(0, 200)); } catch {} });
+                p.on('error', (e) => resolveRun({ out, err: (err + '\n' + (e && e.message || e)).trim(), code: -1 }));
+                p.on('close', (code) => resolveRun({ out, err, code }));
+              });
+
+              const deadlineMs = Math.max(5000, Number(timeoutMs || 30000));
+              const result = await Promise.race([
+                run(),
+                new Promise(r => setTimeout(() => r({ out: '', err: 'timeout', code: 124 }), deadlineMs))
+              ]);
+
+              if (tmpFile) { try { await fs.unlink(tmpFile); } catch {} }
+
+              if (!result || result.err === 'timeout') {
+                return { ok: false, error: 'RapidOCR 超时' };
+              }
+
+              let text = '';
+              const extractTexts = (obj) => {
+                const items = Array.isArray(obj) ? obj : (obj.results || obj.data || []);
+                const lines = [];
+                (items || []).forEach(it => { const s = it && (it.text || it.txt || it.ocr_text || it.content); if (s) lines.push(String(s)); });
+                return lines;
+              };
+              const tryParseVariants = (s) => {
+                const raw = String(s || '').trim();
+                // v1: 直接解析
+                try { return JSON.parse(raw); } catch {}
+                // v2: 取第一个 '{' 到最后一个 '}' 的子串
+                try {
+                  const i = raw.indexOf('{');
+                  const j = raw.lastIndexOf('}');
+                  if (i >= 0 && j > i) {
+                    const sub = raw.substring(i, j + 1);
+                    return JSON.parse(sub);
+                  }
+                } catch {}
+                // v3: 逐行解析，取含有 data/结果 字段的对象
+                try {
+                  const lines = raw.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+                  for (const ln of lines.reverse()) {
+                    if (ln.startsWith('{') && ln.endsWith('}')) {
+                      try {
+                        const obj = JSON.parse(ln);
+                        if (obj && (obj.data || obj.results)) return obj;
+                      } catch {}
+                    }
+                  }
+                } catch {}
+                return null;
+              };
+              const parsed = tryParseVariants(result.out || '');
+              if (parsed) {
+                const lines = extractTexts(parsed);
+                text = lines.join('\n').trim();
+              } else {
+                text = '';
+              }
+
+              if (text) return { ok: true, data: { text, raw: result.out } };
+              return { ok: false, error: (result.err || '无输出').trim() };
+
+            } catch (e) {
+              return { ok: false, error: e && e.message || String(e) };
+            }
+          }
+          default: {
+            try {
+              const pid = getPluginIdFromEvent(event);
+              if (!this.isQuiet) console.warn('[mt.secure-call] unknown channel:', channel, 'from plugin:', pid || 'unknown');
+            } catch {}
             return { ok: false, error: 'unknown channel' };
+          }
         }
       } catch (e) {
         return { ok: false, error: e && e.message || String(e) };

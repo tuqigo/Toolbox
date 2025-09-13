@@ -9,6 +9,7 @@ package-lock.json
 dist/
 out/
 cache/
+plugins/ocr-umi/RapidOCR/
 
 # Electron
 *.log
