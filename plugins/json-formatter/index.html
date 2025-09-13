@@ -9,13 +9,13 @@
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; display: flex; height: 100vh; background: var(--bg); color: var(--fg); }
     .layout { display: grid; grid-template-rows: 1fr 44px; grid-template-columns: 1fr; grid-template-areas: 'viewer' 'query'; width: 100%; height: 100vh; }
     .viewer-container { grid-area: viewer; display: flex; overflow: hidden; }
-    .line-numbers { width: 60px; background: var(--panel); border-right: 1px solid var(--border); padding: 10px 5px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; color: var(--muted); line-height: 1.5; overflow: hidden; user-select: none; position: relative; }
-    .line-number { display: flex; align-items: center; height: 21px; position: relative; }
-    .line-num { flex: 1; text-align: right; padding-right: 4px; }
-    .fold-arrow { width: 16px; height: 16px; cursor: pointer; color: var(--muted); font-size: 12px; display: flex; align-items: center; justify-content: center; border-radius: 3px; margin-left: 2px; }
+    .line-numbers { width: 60px; background: var(--panel); border-right: 1px solid var(--border); padding: 10px 5px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; color: var(--muted); line-height: 20px; overflow: hidden; user-select: none; position: relative; }
+    .line-number { display: flex; align-items: center; height: 20px; position: relative; }
+    .line-num { flex: 1; text-align: right; padding-right: 4px; line-height: 20px; }
+    .fold-arrow { width: 16px; height: 16px; cursor: pointer; color: var(--muted); font-size: 12px; display: flex; align-items: center; justify-content: center; border-radius: 3px; margin-left: 2px; line-height: 20px; }
     .fold-arrow:hover { background: rgba(0,0,0,0.1); color: var(--fg); }
     .fold-arrow.hidden { visibility: hidden; }
-    .editor { flex: 1; border: none; outline: none; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; background: var(--panel); color: var(--fg); line-height: 1.5; resize: none; white-space: pre; overflow-wrap: normal; overflow-x: auto; overflow-y: auto; }
+    .editor { flex: 1; border: none; outline: none; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; background: var(--panel); color: var(--fg); line-height: 20px; resize: none; white-space: pre; overflow-wrap: normal; overflow-x: auto; overflow-y: auto; }
     .error { color: #ef4444; padding: 8px 10px; border-top: 1px solid var(--border); background: rgba(239,68,68,0.08); font-size: 12px; display: none; }
     .query { grid-area: query; position: sticky; bottom: 0; z-index: 10; border-top: 1px solid var(--border); display:flex; align-items:center; gap:8px; padding: 6px 10px; background: var(--panel); }
     .query input { flex:1; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background: var(--panel); color: var(--fg); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -130,7 +130,7 @@
     </div>
     <div id="error" class="error"></div>
     <div class="query">
-      <div class="query-hint">this</div>
+      <div class="query-hint">this.</div>
       <input id="query" placeholder="例如：this.items.filter(x=>x.active).map(x=>x.name)">
       <button class="icon-btn" id="btnFormat" title="重新格式化">{ }</button>
       <button class="icon-btn" id="btnCollapseAll" title="折叠全部">➖</button>
@@ -141,5 +141,3 @@
   <div class="tooltip" id="tooltip"></div>
 </body>
 </html>
-
-

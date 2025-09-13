@@ -205,11 +205,11 @@
       const lineEl = document.createElement('div');
       lineEl.className = 'line-number';
       // 确保行号元素的高度与编辑器行高完全一致
-      lineEl.style.height = '21px'; // 1.5 * 14px
-      lineEl.style.lineHeight = '21px';
+      lineEl.style.height = '20px'; // 修改为20px
+      lineEl.style.lineHeight = '20px'; // 修改为20px
       lineEl.innerHTML = `
         <span class="line-num">${lineNum}</span>
-        <span class="fold-arrow ${isFoldable ? '' : 'hidden'}" data-line="${i}" style="line-height: 21px;">
+        <span class="fold-arrow ${isFoldable ? '' : 'hidden'}" data-line="${i}" style="line-height: 20px;">
           ${isFolded ? '▸' : '▾'}
         </span>
       `;
@@ -345,6 +345,7 @@
   // 执行查询 - 优化错误处理
   function runQuery() {
     const source = String(queryInput.value || '').trim();
+    const sourceTmp = 'this.'+source;
     if (!source) {
       // 如果查询为空，恢复原始数据显示
       if (currentData) {
@@ -361,7 +362,7 @@
     
     try {
       // 在原始数据上执行查询，不修改 currentData
-      const fn = new Function(`return (function(){ with(this){ return (${source}); } })`);
+      const fn = new Function(`return (function(){ with(this){ return (${sourceTmp}); } })`);
       const queryResult = fn().call(currentData);
       
       // 显示查询结果
@@ -385,8 +386,8 @@
         const lineNum = i + 1;
         const lineEl = document.createElement('div');
         lineEl.className = 'line-number';
-        lineEl.style.height = '21px';
-        lineEl.style.lineHeight = '21px';
+        lineEl.style.height = '20px'; // 修改为20px
+        lineEl.style.lineHeight = '20px'; // 修改为20px
         lineEl.innerHTML = `
           <span class="line-num">${lineNum}</span>
           <span class="fold-arrow hidden"></span>
@@ -561,7 +562,7 @@
       // 计算匹配项的行号和位置
       const beforeText = editor.value.substring(0, match.start);
       const lineNumber = beforeText.split('\n').length;
-      const lineHeight = 21; // 1.5 * 14px
+      const lineHeight = 20; // 修改为20px
       
       // 获取编辑器可视区域信息
       const editorHeight = editor.clientHeight;
