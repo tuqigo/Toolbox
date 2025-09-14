@@ -1,0 +1,30 @@
+{
+  "id": "http-sniffer",
+  "name": "HTTP 抓包",
+  "description": "启动/停止本地 HTTP(S) 代理，抓取并过滤请求，支持证书安装与 HAR 导出",
+  "version": "0.1.0",
+  "author": "MiniToolbox Team",
+  "icon": "🕵️",
+  "instance": "single",
+  "window": {
+    "width": 980,
+    "height": 640,
+    "resizable": true,
+    "hideOnBlur": false,
+    "center": true
+  },
+  "main": "index.html",
+  "features": [
+    {
+      "code": "http-sniffer.open",
+      "explain": "打开 HTTP 抓包面板",
+      "cmds": [
+        { "type": "keyword", "value": "抓包" },
+        { "type": "keyword", "value": "http抓包" },
+        { "type": "keyword", "value": "https抓包" },
+        { "type": "keyword", "value": "sniffer" },
+        { "type": "keyword", "value": "proxy" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HTTP 抓包</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #151820;
+      --panel-2: #0f141b;
+      --fg: #e6e7ea;
+      --muted: #9aa3b2;
+      --border: #232837;
+      --primary: #4f8cff;
+      --ok: #3cc86b;
+      --warn: #ffb86c;
+      --bad: #ff6b6b;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial, PingFang SC, Microsoft Yahei, sans-serif; background: var(--bg); color: var(--fg); }
+    .appbar { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: linear-gradient(180deg, #121622, #0f131c); position: sticky; top: 0; z-index: 2; }
+    .appbar .title { font-weight: 600; letter-spacing: 0.2px; }
+    .pill { padding: 4px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); }
+    .pill.ok { background: rgba(60,200,107,0.12); color: var(--ok); border-color: rgba(60,200,107,0.28); }
+    .pill.bad { background: rgba(255,107,107,0.12); color: var(--bad); border-color: rgba(255,107,107,0.28); }
+    .spacer { flex: 1; }
+    .btn { height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--fg); cursor: pointer; transition: .15s ease; }
+    .btn:hover { border-color: #2f3647; background: #1a2130; }
+    .btn.primary { background: #1a3b7a; border-color: #214992; color: #cfe0ff; }
+    .btn.primary:hover { background: #1d448e; }
+    .toolbar { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
+    .group { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--border); padding: 8px; border-radius: 10px; }
+    .group label { font-size: 12px; color: var(--muted); }
+    .input, .select { height: 30px; border-radius: 8px; border: 1px solid var(--border); background: #0e121a; color: var(--fg); padding: 0 10px; }
+    .input::placeholder { color: #5c6779; }
+    .main { display: grid; grid-template-columns: 1.1fr 0.9fr; height: calc(100vh - 120px); }
+    .list { overflow: auto; border-right: 1px solid var(--border); background: var(--panel); }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    thead th { position: sticky; top: 0; background: var(--panel-2); border-bottom: 1px solid var(--border); text-align: left; padding: 10px 10px; font-weight: 600; color: var(--muted); }
+    tbody td { padding: 9px 10px; border-bottom: 1px solid #1e2432; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+    tbody tr:hover { background: #151b28; }
+    .status-err { color: var(--bad); }
+    .status-ok { color: var(--ok); }
+    .detail { overflow: auto; padding: 12px; background: var(--panel); }
+    .note { color: var(--warn); margin-bottom: 8px; }
+    .kv { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; background: #0f141d; border: 1px solid var(--border); padding: 10px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div class="appbar">
+    <div class="title">HTTP 抓包</div>
+    <div id="pillRunning" class="pill">未运行</div>
+    <div class="spacer"></div>
+    <button id="btnInstallCert" class="btn" title="安装根证书（当前用户-受信任的根）">安装证书</button>
+    <button id="btnClear" class="btn">清空</button>
+    <button id="btnExport" class="btn">导出 HAR</button>
+  </div>
+  <div class="toolbar">
+    <div class="group">
+      <button id="btnStart" class="btn primary">启动</button>
+      <button id="btnStop" class="btn">停止</button>
+      <div class="spacer" style="width:6px"></div>
+      <button id="btnEnableSys" class="btn">启用系统代理</button>
+      <button id="btnDisableSys" class="btn">禁用系统代理</button>
+    </div>
+    <div class="group">
+      <label>端口</label>
+      <input id="port" type="number" value="8888" class="input" style="width:100px"/>
+      <label>目标域</label>
+      <input id="targets" type="text" class="input" placeholder="example.com,*.foo.com" style="width:240px"/>
+    </div>
+    <div class="group">
+      <label>方法</label>
+      <select id="fMethod" class="select">
+        <option value="">ALL</option>
+        <option>GET</option>
+        <option>POST</option>
+        <option>PUT</option>
+        <option>DELETE</option>
+        <option>PATCH</option>
+      </select>
+      <input id="fHost" class="input" placeholder="host 过滤" style="width:140px"/>
+      <input id="fPath" class="input" placeholder="path 过滤" style="width:180px"/>
+      <input id="fStatus" class="input" placeholder="status" style="width:90px"/>
+    </div>
+  </div>
+  <div class="main">
+    <div class="list">
+      <table>
+        <thead><tr>
+          <th style="width:72px">时间</th>
+          <th style="width:64px">方法</th>
+          <th>主机</th>
+          <th>路径</th>
+          <th style="width:64px">状态</th>
+          <th style="width:80px">耗时(ms)</th>
+        </tr></thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+    <div class="detail">
+      <div class="note">提示：HTTPS 抓包需要安装并信任自签根证书，仅在你明确授权与合法合规场景下使用。</div>
+      <div id="detailBox" class="kv">请选择一条请求...</div>
+    </div>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>

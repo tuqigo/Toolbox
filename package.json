@@ -25,15 +25,16 @@
   "author": "MiniToolbox Team",
   "license": "MIT",
   "devDependencies": {
+    "archiver": "^6.0.0",
     "electron": "^28.0.0",
     "electron-builder": "^24.0.0",
     "electron-packager": "^17.1.2",
-    "archiver": "^6.0.0",
     "form-data": "^4.0.0"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.0",
     "fs-extra": "^11.0.0",
+    "http-mitm-proxy": "^1.1.0",
     "yauzl": "^2.10.0"
   },
   "build": {
@@ -85,17 +86,24 @@
       "node_modules/file-uri-to-path/**/*"
     ],
     "extraResources": [],
-    "electronLanguages": ["en-US", "zh-CN"],
+    "electronLanguages": [
+      "en-US",
+      "zh-CN"
+    ],
     "afterPack": "tools/afterPack.js",
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "build/icon.ico",

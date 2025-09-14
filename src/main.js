@@ -27,6 +27,7 @@ const { PluginInstaller } = require('./core/pluginInstaller');
 const { IconManager } = require('./core/iconManager');
 const { DBStore } = require('./core/dbStore');
 const { FileLogger } = require('./utils/logger');
+const { CaptureProxyService } = require('./core/captureProxy');
 const { pathToFileURL } = require('url');
 
 class MiniToolbox {
@@ -74,6 +75,8 @@ class MiniToolbox {
     this.iconManager = new IconManager();
     this.devLoggingInitialized = false;
     this.fileLogger = null;
+    // 抓包服务
+    try { this.captureProxy = new CaptureProxyService({ isQuiet: this.isQuiet, getDataDir: this.getDataDir.bind(this) }); } catch {}
 
     // SQLite 存储（延迟打开，按需使用）
     this.dbStore = new DBStore({
@@ -922,6 +925,29 @@ class MiniToolbox {
             return { ok: true };
           case 'net.request':
             return await this.performRequest(payload);
+          // 抓包代理控制通道（仅主进程托管，插件 UI 通过此网关调用）
+          case 'capture.start':
+            try { const ret = await this.captureProxy.start(payload || {}); return { ok: true, data: ret }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          case 'capture.stop':
+            try { const ret = await this.captureProxy.stop(); return { ok: true, data: ret }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          case 'capture.status':
+            try { return { ok: true, data: this.captureProxy.status() }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          case 'capture.list':
+            try { return { ok: true, data: this.captureProxy.list(payload || {}) }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          case 'capture.detail':
+            try { return { ok: true, data: this.captureProxy.detail(payload && payload.id) }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          case 'capture.clear':
+            try { return { ok: true, data: this.captureProxy.clear() }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          case 'capture.exportHar':
+            try { const s = await this.captureProxy.exportHar(payload || {}); return { ok: true, data: s }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          case 'capture.installCert':
+            try { const ret = await this.captureProxy.installCert(); return { ok: ret && ret.ok, data: ret, error: ret && ret.ok ? undefined : 'install failed' }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          case 'capture.uninstallCert':
+            try { const ret = await this.captureProxy.uninstallCert(); return { ok: ret && ret.ok, data: ret, error: ret && ret.ok ? undefined : 'uninstall failed' }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          case 'capture.enableSystemProxy':
+            try { const ret = await this.captureProxy.enableSystemProxy(payload || {}); return { ok: ret && ret.ok, data: ret, error: ret && ret.ok ? undefined : (ret && ret.error) || 'enable failed' }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          case 'capture.disableSystemProxy':
+            try { const ret = await this.captureProxy.disableSystemProxy(); return { ok: ret && ret.ok, data: ret, error: ret && ret.ok ? undefined : 'disable failed' }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
           // DB & Stats 通道（仅允许真实来源插件访问自身命名空间）
           case 'db.put': {
             let { collection, key, value, featureCode: fc } = payload || {};
