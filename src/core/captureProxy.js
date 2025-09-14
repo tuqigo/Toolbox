@@ -3,7 +3,22 @@ const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
 const zlib = require('zlib');
-const { Proxy } = require('http-mitm-proxy/dist');
+// 延迟加载 http-mitm-proxy，避免冷启动硬依赖
+
+let __CachedProxyClass = null;
+
+async function __loadProxyClass(isQuiet) {
+  if (__CachedProxyClass) return __CachedProxyClass;
+  try {
+    const mod = require('http-mitm-proxy');
+    __CachedProxyClass = mod && (mod.Proxy || mod.default || mod);
+    if (!__CachedProxyClass) throw new Error('invalid http-mitm-proxy export');
+    return __CachedProxyClass;
+  } catch (e) {
+    try { if (!isQuiet) console.error('[CAPTURE] load http-mitm-proxy failed:', e && e.message); } catch {}
+    throw e;
+  }
+}
 
 class CaptureProxyService {
   constructor(options = {}) {
@@ -20,6 +35,7 @@ class CaptureProxyService {
     this.records = []; // 环形缓存
     this.idCounter = 0;
     this.startedAt = null;
+    this.__ProxyClass = null;
   }
 
   async ensureDirs() {
@@ -41,7 +57,8 @@ class CaptureProxyService {
     this.keepBodies = opts.recordBody !== false;
     this.targetHosts = this._normalizeTargetHosts(opts.targets); // string|array|null
 
-    this.proxy = new Proxy();
+    if (!this.__ProxyClass) this.__ProxyClass = await __loadProxyClass(this.isQuiet);
+    this.proxy = new this.__ProxyClass();
 
     // 核心钩子：请求/响应
     this.proxy.onError((ctx, err, kind) => {
@@ -591,9 +608,10 @@ class CaptureProxyService {
     // 启动过 proxy.listen 才会生成 CA；如果未启动过，手动触发一次创建
     const caPem = path.join(this.caDir, 'certs', 'ca.pem');
     if (await fs.pathExists(caPem)) return;
+    const ProxyClass = await __loadProxyClass(this.isQuiet);
     await new Promise((resolve, reject) => {
       try {
-        const tmp = new Proxy();
+        const tmp = new ProxyClass();
         tmp.listen({ port: 0, sslCaDir: this.caDir }, (err) => {
           try { tmp.close(); } catch {}
           if (err) return reject(err);

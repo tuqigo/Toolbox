@@ -60,6 +60,13 @@
     <div id="pillRunning" class="pill">未运行</div>
     <div id="pillCert" class="pill">证书未安装</div>
     <div class="spacer"></div>
+    <div class="group">
+      <label>端口</label>
+      <input id="port" type="number" value="8888" class="input" style="width:100px"/>
+      <label>目标域</label>
+      <input id="targets" type="text" class="input" placeholder="example.com,*.foo.com" style="width:240px"/>
+      <button id="btnApplyTargets" class="btn" title="应用抓包范围">应用</button>
+    </div>
     <button id="btnRefresh" class="btn" title="刷新状态" aria-label="刷新">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35A7.95 7.95 0 0012 4a8 8 0 108 8h-2a6 6 0 11-6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
       <span class="btn-text">刷新</span>
@@ -87,13 +94,6 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13H5v-2h14v2z"/></svg>
         <span class="btn-text">禁用</span>
       </button>
-    </div>
-    <div class="group">
-      <label>端口</label>
-      <input id="port" type="number" value="8888" class="input" style="width:100px"/>
-      <label>目标域</label>
-      <input id="targets" type="text" class="input" placeholder="example.com,*.foo.com" style="width:240px"/>
-      <button id="btnApplyTargets" class="btn" title="应用抓包范围">应用</button>
     </div>
     <div class="group">
       <label>方法</label>

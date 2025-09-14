@@ -83,7 +83,16 @@
       "node_modules/better-sqlite3/lib/**/*",
       "node_modules/better-sqlite3/build/Release/*.node",
       "node_modules/bindings/**/*",
-      "node_modules/file-uri-to-path/**/*"
+      "node_modules/file-uri-to-path/**/*",
+      "node_modules/http-mitm-proxy/**/*",
+      "node_modules/async/**/*",
+      "node_modules/ws/**/*",
+      "node_modules/semaphore/**/*",
+      "node_modules/uuid/**/*",
+      "node_modules/node-forge/**/*",
+      "node_modules/mkdirp/**/*",
+      "node_modules/debug/**/*",
+      "node_modules/ms/**/*"
     ],
     "extraResources": [],
     "electronLanguages": [
