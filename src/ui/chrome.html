@@ -1,15 +1,25 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline' 'self'; style-src 'unsafe-inline' 'self'; img-src 'self' data:;" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'unsafe-inline' 'self'; style-src 'unsafe-inline' 'self'; img-src 'self' data:;" />
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+
     /* 顶栏容器：高度由宿主决定（例如外部 iframe / 窗口），这里占满父高度 */
     .bar {
       height: 100%;
       display: flex;
-      align-items: stretch;              /* 左右区域拉满高度，便于右侧按钮拉伸为正方形 */
+      align-items: stretch;
+      /* 左右区域拉满高度，便于右侧按钮拉伸为正方形 */
       justify-content: space-between;
       background: #f9f9fb;
       border-bottom: 1px solid #ececf2;
@@ -19,19 +29,54 @@
     }
 
     /* 左侧保留垂直居中，右侧用于放置正方形按钮需拉伸 */
-    .left { display:flex; align-items:center; gap:8px; -webkit-app-region: no-drag; }
-    .right { display:flex; align-items:stretch; gap:0; -webkit-app-region: no-drag; }
+    .left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      -webkit-app-region: no-drag;
+    }
 
-    .title { font-size: 13px; color: #333; user-select: none; align-self: center; }
-    .icon { font-size: 14px; width: 22px; height: 22px; text-align: center; display:flex; align-items:center; justify-content:center; }
-    .icon img { width: 100%; height: 100%; object-fit: contain; display:block; }
+    .right {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      -webkit-app-region: no-drag;
+    }
+
+    .title {
+      font-size: 13px;
+      color: #333;
+      user-select: none;
+      align-self: center;
+    }
+
+    .icon {
+      font-size: 14px;
+      width: 22px;
+      height: 22px;
+      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .icon img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
 
     /* 按钮：拉满高度并保持 1:1 宽高比 => 正方形（边长 = 顶栏高度） */
     .btn {
-      align-self: stretch;       /* 拉满父容器高度 */
-      aspect-ratio: 1 / 1;       /* 宽高比 1:1，宽度 = 高度（即顶栏高度） */
-      padding: 0;                /* 用 padding 会影响精确正方形，设为 0 */
-      min-width: 36px;           /* 可选，避免极窄时过小 */
+      align-self: stretch;
+      /* 拉满父容器高度 */
+      aspect-ratio: 1 / 1;
+      /* 宽高比 1:1，宽度 = 高度（即顶栏高度） */
+      padding: 0;
+      /* 用 padding 会影响精确正方形，设为 0 */
+      min-width: 36px;
+      /* 可选，避免极窄时过小 */
       display: flex;
       align-items: center;
       justify-content: center;
@@ -42,20 +87,47 @@
       transition: background-color .15s ease;
       box-sizing: border-box;
     }
+
     /* hover 覆盖整个正方形 */
-    .btn:hover { background: rgba(0,0,0,0.15); }
-    .btn:active { background: rgba(0,0,0,0.1); }
+    .btn:hover {
+      background: rgba(0, 0, 0, 0.15);
+    }
 
-    .btn-close:hover { background: rgba(211,51,51,0.8); }
-    .btn-close:hover svg path { fill: #fff; }
+    .btn:active {
+      background: rgba(0, 0, 0, 0.1);
+    }
 
-    .btn-pin svg path { fill: #666; }
-    .btn-pin.active svg path { fill: #9aa0a6; }
+    .btn-close:hover {
+      background: rgba(211, 51, 51, 0.8);
+    }
 
-    .btn-max svg path { fill: #666; }
-    .btn-max.maximized svg path { fill: #9aa0a6; }
+    .btn-close:hover svg path {
+      fill: #fff;
+    }
+
+    /*     .btn-pin svg path { fill: #666; }
+    .btn-pin.active svg path { fill: #9aa0a6; } */
+
+    /* 覆盖 SVG path 的 fill（使用 !important 覆盖内联 fill 属性）*/
+    .btn-pin svg path {
+      fill: #666 !important;
+    }
+
+    .btn-pin.active svg path {
+      fill: #9aa0a6 !important;
+    }
+
+
+    .btn-max svg path {
+      fill: #666;
+    }
+
+    .btn-max.maximized svg path {
+      fill: #9aa0a6;
+    }
   </style>
 </head>
+
 <body>
   <div class="bar">
     <div class="left">
@@ -63,19 +135,49 @@
       <div class="title" id="title">Plugin</div>
     </div>
     <div class="right">
-      <div class="btn btn-pin" id="tnPin" title="钉住"><svg width="18" height="18" viewBox="0 0 1024 1024"><path d="M689.291636 27.648c23.691636 0 42.961455 18.850909 43.613091 42.402909V322.141091l1.489455 1.442909c77.544727 77.265455 122.274909 170.356364 133.259636 277.876364l0.372364 3.537454 0.325818 3.537455a43.659636 43.659636 0 0 1-42.263273 47.476363H560.034909v298.914909a45.800727 45.800727 0 0 1-91.694545 0v-298.914909H207.825455a43.659636 43.659636 0 0 1-43.613091-42.449454v-1.210182c0-107.333818 39.563636-202.938182 117.341091-284.858182l2.466909-2.56 2.187636-2.327273v-251.345454c0-23.272727 18.245818-42.309818 41.239273-43.566546h1.210182l1.210181-0.046545h359.424z m-43.659636 87.272727H373.480727v225.885091a43.659636 43.659636 0 0 1-11.450182 29.509818l-0.977454 1.024-1.024 0.977455c-59.345455 56.832-94.021818 119.901091-104.820364 190.464l-0.465454 3.165091-0.418909 2.792727h520.052363l-0.791272-3.584c-15.918545-71.493818-51.944727-133.632-108.637091-187.345454l-2.699637-2.56-2.513454-2.327273a43.659636 43.659636 0 0 1-14.056728-30.72V114.967273z" fill="#666"/></svg></div>
-      <div class="btn" id="tnDev" title="开发者工具" style="display:none"><svg width="16" height="16" viewBox="0 0 1024 1024"><path d="M749.696 155.477333H274.304a118.826667 118.826667 0 0 0-118.826667 118.826667V749.653333a118.826667 118.826667 0 0 0 118.826667 118.826667H749.653333a118.869333 118.869333 0 0 0 118.826667-118.826667V274.304a118.869333 118.869333 0 0 0-118.784-118.826667z m59.434667 594.218667a59.477333 59.477333 0 0 1-59.434667 59.434667H274.304a59.477333 59.477333 0 0 1-59.434667-59.434667V274.304a59.477333 59.477333 0 0 1 59.434667-59.434667H749.653333a59.477333 59.477333 0 0 1 59.434667 59.434667z" fill="#666"/><path d="M303.530667 501.930667l72.533333-91.904a23.765333 23.765333 0 0 0-37.290667-29.482667l-83.2 105.301333a23.765333 23.765333 0 0 0-1.28 27.648l83.2 128a23.765333 23.765333 0 1 0 39.850667-25.898666zM685.141333 380.672a23.765333 23.765333 0 0 0-37.290666 29.482667l72.533333 91.904-73.898667 113.877333a23.765333 23.765333 0 0 0 39.850667 25.898667l83.2-128a23.765333 23.765333 0 0 0-1.28-27.648zM554.794667 373.034667a23.765333 23.765333 0 0 0-29.866667 15.701333l-71.594667 232.490667a23.765333 23.765333 0 1 0 45.44 13.994666l71.594667-232.490666a23.765333 23.765333 0 0 0-15.573333-29.696z" fill="#666"/></svg></div>
-      <div class="btn" id="tnMin" title="最小化"><svg width="16" height="16" viewBox="0 0 1024 1024"><path d="M512 1255.489906" fill="#666"/><path d="M498.081951 943.76654" fill="#666"/><path d="M772.963422 533.491105l-528.06716 0c-12.38297 0-22.514491-10.131521-22.514491-22.514491l0 0c0-12.38297 10.131521-22.514491 22.514491-22.514491l528.06716 0c12.38297 0 22.514491 10.131521 22.514491 22.514491l0 0C795.477913 523.359584 785.346392 533.491105 772.963422 533.491105z" fill="#666"/></svg></div>
+      <div class="btn btn-pin" id="tnPin" title="钉住"><svg width="18" height="18" viewBox="0 0 1024 1024">
+          <path
+            d="M689.291636 27.648c23.691636 0 42.961455 18.850909 43.613091 42.402909V322.141091l1.489455 1.442909c77.544727 77.265455 122.274909 170.356364 133.259636 277.876364l0.372364 3.537454 0.325818 3.537455a43.659636 43.659636 0 0 1-42.263273 47.476363H560.034909v298.914909a45.800727 45.800727 0 0 1-91.694545 0v-298.914909H207.825455a43.659636 43.659636 0 0 1-43.613091-42.449454v-1.210182c0-107.333818 39.563636-202.938182 117.341091-284.858182l2.466909-2.56 2.187636-2.327273v-251.345454c0-23.272727 18.245818-42.309818 41.239273-43.566546h1.210182l1.210181-0.046545h359.424z m-43.659636 87.272727H373.480727v225.885091a43.659636 43.659636 0 0 1-11.450182 29.509818l-0.977454 1.024-1.024 0.977455c-59.345455 56.832-94.021818 119.901091-104.820364 190.464l-0.465454 3.165091-0.418909 2.792727h520.052363l-0.791272-3.584c-15.918545-71.493818-51.944727-133.632-108.637091-187.345454l-2.699637-2.56-2.513454-2.327273a43.659636 43.659636 0 0 1-14.056728-30.72V114.967273z"
+            fill="#666" />
+        </svg></div>
+      <div class="btn" id="tnDev" title="开发者工具" style="display:none"><svg width="16" height="16"
+          viewBox="0 0 1024 1024">
+          <path
+            d="M749.696 155.477333H274.304a118.826667 118.826667 0 0 0-118.826667 118.826667V749.653333a118.826667 118.826667 0 0 0 118.826667 118.826667H749.653333a118.869333 118.869333 0 0 0 118.826667-118.826667V274.304a118.869333 118.869333 0 0 0-118.784-118.826667z m59.434667 594.218667a59.477333 59.477333 0 0 1-59.434667 59.434667H274.304a59.477333 59.477333 0 0 1-59.434667-59.434667V274.304a59.477333 59.477333 0 0 1 59.434667-59.434667H749.653333a59.477333 59.477333 0 0 1 59.434667 59.434667z"
+            fill="#666" />
+          <path
+            d="M303.530667 501.930667l72.533333-91.904a23.765333 23.765333 0 0 0-37.290667-29.482667l-83.2 105.301333a23.765333 23.765333 0 0 0-1.28 27.648l83.2 128a23.765333 23.765333 0 1 0 39.850667-25.898666zM685.141333 380.672a23.765333 23.765333 0 0 0-37.290666 29.482667l72.533333 91.904-73.898667 113.877333a23.765333 23.765333 0 0 0 39.850667 25.898667l83.2-128a23.765333 23.765333 0 0 0-1.28-27.648zM554.794667 373.034667a23.765333 23.765333 0 0 0-29.866667 15.701333l-71.594667 232.490667a23.765333 23.765333 0 1 0 45.44 13.994666l71.594667-232.490666a23.765333 23.765333 0 0 0-15.573333-29.696z"
+            fill="#666" />
+        </svg></div>
+      <div class="btn" id="tnMin" title="最小化"><svg width="16" height="16" viewBox="0 0 1024 1024">
+          <path d="M512 1255.489906" fill="#666" />
+          <path d="M498.081951 943.76654" fill="#666" />
+          <path
+            d="M772.963422 533.491105l-528.06716 0c-12.38297 0-22.514491-10.131521-22.514491-22.514491l0 0c0-12.38297 10.131521-22.514491 22.514491-22.514491l528.06716 0c12.38297 0 22.514491 10.131521 22.514491 22.514491l0 0C795.477913 523.359584 785.346392 533.491105 772.963422 533.491105z"
+            fill="#666" />
+        </svg></div>
       <div class="btn btn-max" id="tnMax" title="最大化/还原">
-        <svg class="maximize-icon" width="16" height="16" viewBox="0 0 1024 1024"><path d="M770.9 923.3H253.1c-83.8 0-151.9-68.2-151.9-151.9V253.6c0-83.8 68.2-151.9 151.9-151.9h517.8c83.8 0 151.9 68.2 151.9 151.9v517.8c0 83.8-68.1 151.9-151.9 151.9zM253.1 181.7c-39.7 0-71.9 32.3-71.9 71.9v517.8c0 39.7 32.3 71.9 71.9 71.9h517.8c39.7 0 71.9-32.3 71.9-71.9V253.6c0-39.7-32.3-71.9-71.9-71.9H253.1z" fill="#666"/></svg>
-        <svg class="restore-icon" width="16" height="16" viewBox="0 0 1024 1024" style="display:none;"><path d="M812.2 65H351.6c-78.3 0-142.5 61.1-147.7 138.1-77 5.1-138.1 69.4-138.1 147.7v460.6c0 81.6 66.4 148 148 148h460.6c78.3 0 142.5-61.1 147.7-138.1 77-5.1 138.1-69.4 138.1-147.7V213c0-81.6-66.4-148-148-148z m-45.8 746.3c0 50.7-41.3 92-92 92H213.8c-50.7 0-92-41.3-92-92V350.7c0-50.7 41.3-92 92-92h460.6c50.7 0 92 41.3 92 92v460.6z m137.8-137.7c0 47.3-35.8 86.3-81.8 91.4V350.7c0-81.6-66.4-148-148-148H260.2c5.1-45.9 44.2-81.8 91.4-81.8h460.6c50.7 0 92 41.3 92 92v460.7z" fill="#666"/></svg>
+        <svg class="maximize-icon" width="16" height="16" viewBox="0 0 1024 1024">
+          <path
+            d="M770.9 923.3H253.1c-83.8 0-151.9-68.2-151.9-151.9V253.6c0-83.8 68.2-151.9 151.9-151.9h517.8c83.8 0 151.9 68.2 151.9 151.9v517.8c0 83.8-68.1 151.9-151.9 151.9zM253.1 181.7c-39.7 0-71.9 32.3-71.9 71.9v517.8c0 39.7 32.3 71.9 71.9 71.9h517.8c39.7 0 71.9-32.3 71.9-71.9V253.6c0-39.7-32.3-71.9-71.9-71.9H253.1z"
+            fill="#666" />
+        </svg>
+        <svg class="restore-icon" width="16" height="16" viewBox="0 0 1024 1024" style="display:none;">
+          <path
+            d="M812.2 65H351.6c-78.3 0-142.5 61.1-147.7 138.1-77 5.1-138.1 69.4-138.1 147.7v460.6c0 81.6 66.4 148 148 148h460.6c78.3 0 142.5-61.1 147.7-138.1 77-5.1 138.1-69.4 138.1-147.7V213c0-81.6-66.4-148-148-148z m-45.8 746.3c0 50.7-41.3 92-92 92H213.8c-50.7 0-92-41.3-92-92V350.7c0-50.7 41.3-92 92-92h460.6c50.7 0 92 41.3 92 92v460.6z m137.8-137.7c0 47.3-35.8 86.3-81.8 91.4V350.7c0-81.6-66.4-148-148-148H260.2c5.1-45.9 44.2-81.8 91.4-81.8h460.6c50.7 0 92 41.3 92 92v460.7z"
+            fill="#666" />
+        </svg>
       </div>
-      <div class="btn btn-close" id="tnClose" title="关闭"><svg width="16" height="16" viewBox="0 0 1024 1024"><path d="M512 466.944l233.472-233.472a31.744 31.744 0 0 1 45.056 45.056L557.056 512l233.472 233.472a31.744 31.744 0 0 1-45.056 45.056L512 557.056l-233.472 233.472a31.744 31.744 0 0 1-45.056-45.056L466.944 512 233.472 278.528a31.744 31.744 0 0 1 45.056-45.056z" fill="#666"/></svg></div>
+      <div class="btn btn-close" id="tnClose" title="关闭"><svg width="16" height="16" viewBox="0 0 1024 1024">
+          <path
+            d="M512 466.944l233.472-233.472a31.744 31.744 0 0 1 45.056 45.056L557.056 512l233.472 233.472a31.744 31.744 0 0 1-45.056 45.056L512 557.056l-233.472 233.472a31.744 31.744 0 0 1-45.056-45.056L466.944 512 233.472 278.528a31.744 31.744 0 0 1 45.056-45.056z"
+            fill="#666" />
+        </svg></div>
     </div>
   </div>
   <script>
-    (function(){
-      function qs(k){ return new URLSearchParams(location.search).get(k) }
+    (function () {
+      function qs(k) { return new URLSearchParams(location.search).get(k) }
       const id = qs('id');
       const name = qs('name') || id;
       const instanceId = qs('instanceId') || 'default';
@@ -96,18 +198,18 @@
 
       const pinEl = document.getElementById('tnPin');
       let pinned = false;
-      const setPinned = (v)=>{ pinned = !!v; if (pinned) pinEl.classList.add('active'); else pinEl.classList.remove('active'); }
-      function safe(fn){ try { fn(); } catch(e) { console && console.warn && console.warn('[mt.chrome]', e); } }
-      pinEl.addEventListener('click', ()=> safe(()=>{ setPinned(!pinned); window.MTChrome && window.MTChrome.pin && window.MTChrome.pin(id, instanceId, pinned); }));
+      const setPinned = (v) => { pinned = !!v; if (pinned) pinEl.classList.add('active'); else pinEl.classList.remove('active'); }
+      function safe(fn) { try { fn(); } catch (e) { console && console.warn && console.warn('[mt.chrome]', e); } }
+      pinEl.addEventListener('click', () => safe(() => { setPinned(!pinned); window.MTChrome && window.MTChrome.pin && window.MTChrome.pin(id, instanceId, pinned); }));
       const devEl = document.getElementById('tnDev');
       if (devEl && isDev) {
         devEl.style.display = 'inline-flex';
-        devEl.addEventListener('click', ()=> safe(()=>{
-          try { setPinned(true); window.MTChrome && window.MTChrome.pin && window.MTChrome.pin(id, instanceId, true); } catch{}
+        devEl.addEventListener('click', () => safe(() => {
+          try { setPinned(true); window.MTChrome && window.MTChrome.pin && window.MTChrome.pin(id, instanceId, true); } catch { }
           window.MTChrome && window.MTChrome.devtools && window.MTChrome.devtools(id, instanceId, 'toggle');
         }));
       }
-      document.getElementById('tnMin').addEventListener('click', ()=> safe(()=>{ window.MTChrome.win(id, instanceId, 'minimize'); }));
+      document.getElementById('tnMin').addEventListener('click', () => safe(() => { window.MTChrome.win(id, instanceId, 'minimize'); }));
 
       const maxEl = document.getElementById('tnMax');
       const maximizeIcon = maxEl.querySelector('.maximize-icon');
@@ -127,32 +229,33 @@
           maxEl.title = '最大化';
         }
       };
-      maxEl.addEventListener('click', ()=> safe(()=>{ 
+      maxEl.addEventListener('click', () => safe(() => {
         window.MTChrome.win(id, instanceId, 'toggle-maximize');
         updateMaxIcon(!isMaximized);
       }));
 
-      document.getElementById('tnClose').addEventListener('click', ()=> safe(()=>{ window.MTChrome.win(id, instanceId, 'close'); }));
+      document.getElementById('tnClose').addEventListener('click', () => safe(() => { window.MTChrome.win(id, instanceId, 'close'); }));
 
-      function applyTheme(payload){
+      function applyTheme(payload) {
         try {
           const eff = (payload && payload.effective) || 'light';
           const bar = document.querySelector('.bar');
           if (!bar) return;
           if (eff === 'dark') {
-            bar.style.background = '#1f2023';
-            bar.style.borderBottomColor = '#2a2b2f';
+            bar.style.background = '#1e1e1e';
+            bar.style.borderBottomColor = '#2b2b2b';
             document.getElementById('title').style.color = '#e6e7ea';
           } else {
             bar.style.background = '#f9f9fb';
             bar.style.borderBottomColor = '#ececf2';
             document.getElementById('title').style.color = '#333';
           }
-        } catch {}
+        } catch { }
       }
-      try { window.electron && window.electron.ipcRenderer && window.electron.ipcRenderer.on && window.electron.ipcRenderer.on('ui-theme', (_e,p)=>applyTheme(p)); } catch {}
-      try { applyTheme({ effective: qs('theme') }); } catch {}
+      try { window.electron && window.electron.ipcRenderer && window.electron.ipcRenderer.on && window.electron.ipcRenderer.on('ui-theme', (_e, p) => applyTheme(p)); } catch { }
+      try { applyTheme({ effective: qs('theme') }); } catch { }
     })();
   </script>
 </body>
+
 </html>
