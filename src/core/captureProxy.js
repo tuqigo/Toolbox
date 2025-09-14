@@ -10,7 +10,7 @@ let __CachedProxyClass = null;
 async function __loadProxyClass(isQuiet) {
   if (__CachedProxyClass) return __CachedProxyClass;
   try {
-    const mod = require('http-mitm-proxy');
+    const mod = require('http-mitm-proxy/dist');
     __CachedProxyClass = mod && (mod.Proxy || mod.default || mod);
     if (!__CachedProxyClass) throw new Error('invalid http-mitm-proxy export');
     return __CachedProxyClass;
