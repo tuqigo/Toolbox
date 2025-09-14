@@ -126,6 +126,16 @@
     </div>
     <div class="detail">
       <div class="note">提示：HTTPS 抓包需要安装并信任自签根证书，仅在你明确授权与合法合规场景下使用。</div>
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <button id="btnCopyCurl" class="btn" title="复制为 cURL">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v12h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14l4-4h9c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2z"/></svg>
+          <span class="btn-text">复制cURL</span>
+        </button>
+        <button id="btnReplay" class="btn" title="重放请求">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5v4l4-4-4-4v4C7.58 5 4 8.58 4 13s3.58 8 8 8 8-3.58 8-8h-2c0 3.31-2.69 6-6 6s-6-2.69-6-6 2.69-6 6-6z"/></svg>
+          <span class="btn-text">重放</span>
+        </button>
+      </div>
       <div id="detailBox" class="kv">请选择一条请求...</div>
     </div>
   </div>

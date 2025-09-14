@@ -612,6 +612,224 @@ class CaptureProxyService {
       } catch { resolve(false); }
     });
   }
+
+  // ---------- M1/M2: cURL 生成与请求重放 ----------
+  getRecordById(id) {
+    const rec = this.records.find(x => x && x.id === Number(id));
+    return rec || null;
+  }
+
+  async _readReqBodyBuffer(rec, overrideText) {
+    try {
+      if (overrideText != null) return Buffer.from(String(overrideText), 'utf8');
+      if (rec.reqBodyInline != null) return Buffer.from(String(rec.reqBodyInline), 'utf8');
+      if (rec.reqBodyPath) {
+        try { return await fs.readFile(rec.reqBodyPath); } catch {}
+      }
+      return null;
+    } catch { return null; }
+  }
+
+  _buildUrl(rec, urlOverride) {
+    if (urlOverride) return String(urlOverride);
+    const host = rec.host || 'localhost';
+    const path = rec.path || '/';
+    const scheme = rec.scheme || 'http';
+    return `${scheme}://${host}${path}`;
+  }
+
+  _applyHeaderOverrides(original, overrides) {
+    const headers = { ...(original || {}) };
+    const lower = {};
+    Object.keys(headers).forEach(k => { lower[k.toLowerCase()] = k; });
+    const set = overrides && overrides.set || overrides || {};
+    const remove = (overrides && overrides.remove) || [];
+    // set
+    Object.keys(set).forEach(k => {
+      const v = set[k];
+      const lk = k.toLowerCase();
+      const existed = lower[lk];
+      if (existed) delete headers[existed];
+      headers[k] = v;
+    });
+    // remove
+    remove.forEach(k => {
+      const lk = String(k).toLowerCase();
+      const existed = lower[lk] || k;
+      try { delete headers[existed]; } catch {}
+    });
+    // content-length 会自动计算
+    delete headers['Content-Length']; delete headers['content-length'];
+    return headers;
+  }
+
+  async toCurl({ id, overrides } = {}) {
+    const rec = this.getRecordById(id);
+    if (!rec) return '';
+    const method = String((overrides && overrides.method) || rec.method || 'GET').toUpperCase();
+    const url = this._buildUrl(rec, overrides && overrides.url);
+    const headers = this._applyHeaderOverrides(rec.reqHeaders, overrides && overrides.headers);
+    const bodyBuf = await this._readReqBodyBuffer(rec, overrides && overrides.bodyText);
+
+    const parts = ['curl'];
+    parts.push('-X', this._shQuote(method));
+    parts.push(this._shQuote(url));
+    Object.keys(headers || {}).forEach(k => {
+      const v = headers[k];
+      parts.push('-H', this._shQuote(`${k}: ${v}`));
+    });
+    if (bodyBuf && bodyBuf.length > 0) {
+      if (bodyBuf.length <= 256 * 1024) {
+        const text = bodyBuf.toString('utf8');
+        parts.push('--data-binary', this._shQuote(text));
+      } else if (rec.reqBodyPath) {
+        // 使用文件引用（路径可能包含空格）
+        parts.push('--data-binary', this._shQuote(`@${rec.reqBodyPath}`));
+      }
+    }
+    const cmd = parts.join(' ');
+    try { if (!this.isQuiet) console.log('[CAPTURE][CURL]', { id: rec.id, method, url }); } catch {}
+    return cmd;
+  }
+
+  _shQuote(s) {
+    const str = String(s == null ? '' : s);
+    if (str === '') return "''";
+    // 简化：用单引号并转义单引号
+    return `'${str.replace(/'/g, "'\\''")}'`;
+  }
+
+  async replay({ id, overrides, insecure = false, followRedirects = true, timeoutMs = 20000 } = {}) {
+    const rec = this.getRecordById(id);
+    if (!rec) return { ok: false, error: 'not found' };
+    let urlStr = this._buildUrl(rec, overrides && overrides.url);
+    let method = String((overrides && overrides.method) || rec.method || 'GET').toUpperCase();
+    let headers = this._applyHeaderOverrides(rec.reqHeaders, overrides && overrides.headers);
+    const bodyBuf = await this._readReqBodyBuffer(rec, overrides && overrides.bodyText);
+    const startTs = Date.now();
+
+    try { if (!this.isQuiet) console.log('[CAPTURE][REPLAY][start]', { id: rec.id, url: urlStr, method, bodyBytes: bodyBuf ? bodyBuf.length : 0 }); } catch {}
+
+    const doOne = (targetUrl, curMethod, curHeaders, curBody) => new Promise((resolve) => {
+      try {
+        const u = new URL(targetUrl);
+        const isHttps = u.protocol === 'https:';
+        const mod = isHttps ? require('https') : require('http');
+        // 复制并清洗请求头，避免强制压缩与不必要头部
+        const hdrs = { ...(curHeaders || {}) };
+        try { delete hdrs['accept-encoding']; delete hdrs['Accept-Encoding']; } catch {}
+        try { delete hdrs['content-length']; delete hdrs['Content-Length']; } catch {}
+        try { delete hdrs['connection']; delete hdrs['Connection']; } catch {}
+        const options = {
+          protocol: u.protocol,
+          hostname: u.hostname,
+          port: u.port ? Number(u.port) : (isHttps ? 443 : 80),
+          path: u.pathname + (u.search || ''),
+          method: curMethod,
+          headers: hdrs,
+          rejectUnauthorized: !insecure,
+          timeout: Math.max(1, Number(timeoutMs || 20000))
+        };
+        // content-length
+        if (curBody && curBody.length > 0) {
+          options.headers['Content-Length'] = Buffer.byteLength(curBody);
+        }
+        try { if (!this.isQuiet) console.log('[CAPTURE][REPLAY][request]', { url: targetUrl, method: curMethod, headers: curHeaders, insecure, timeoutMs }); } catch {}
+        const req = mod.request(options, (res) => {
+          const chunks = [];
+          res.on('data', d => chunks.push(Buffer.from(d)));
+          res.on('end', () => {
+            let buf = Buffer.concat(chunks);
+            // 尝试按响应头解压
+            try {
+              const encHeader = res.headers && (res.headers['content-encoding'] || res.headers['Content-Encoding']);
+              const ce = String(encHeader || '').toLowerCase();
+              if (ce) {
+                if (ce.includes('br') && typeof zlib.brotliDecompressSync === 'function') {
+                  try { buf = zlib.brotliDecompressSync(buf); } catch {}
+                } else if (ce.includes('gzip')) {
+                  try { buf = zlib.gunzipSync(buf); } catch {}
+                } else if (ce.includes('deflate')) {
+                  try { buf = zlib.inflateSync(buf); } catch { try { buf = zlib.inflateRawSync(buf); } catch {} }
+                }
+              }
+            } catch {}
+            try { if (!this.isQuiet) console.log('[CAPTURE][REPLAY][response]', { url: targetUrl, status: res.statusCode, bytes: buf.length }); } catch {}
+            resolve({
+              ok: true,
+              status: res.statusCode,
+              headers: res.headers,
+              body: buf,
+              url: targetUrl
+            });
+          });
+        });
+        req.on('timeout', () => { try { req.destroy(new Error('timeout')); } catch {} });
+        req.on('error', (e) => {
+          try { console.error('[CAPTURE][REPLAY][error]', e && e.message || e); } catch {}
+          resolve({ ok: false, error: e && e.message || String(e) });
+        });
+        if (curBody && curBody.length > 0) req.write(curBody);
+        req.end();
+      } catch (e) { resolve({ ok: false, error: e && e.message || String(e) }); }
+    });
+
+    let curUrl = urlStr, curMethod = method, curHeaders = headers, curBody = bodyBuf;
+    let resp = await doOne(curUrl, curMethod, curHeaders, curBody);
+    let redirects = 0;
+    while (followRedirects && resp && resp.ok && resp.status && [301,302,303,307,308].includes(resp.status) && redirects < 5) {
+      const loc = resp.headers && (resp.headers.location || resp.headers.Location);
+      if (!loc) break;
+      let nextUrl = String(loc);
+      try { if (!/^https?:/i.test(nextUrl)) nextUrl = new URL(nextUrl, curUrl).toString(); } catch {}
+      try { if (!this.isQuiet) console.log('[CAPTURE][REPLAY][redirect]', { from: curUrl, to: nextUrl, status: resp.status }); } catch {}
+      if (resp.status === 303 || (resp.status === 302 && curMethod === 'POST')) {
+        curMethod = 'GET';
+        curBody = null;
+        // 删除可能不适用的实体头
+        delete curHeaders['Content-Length']; delete curHeaders['content-length'];
+        delete curHeaders['Content-Type']; delete curHeaders['content-type'];
+      }
+      curUrl = nextUrl;
+      redirects += 1;
+      resp = await doOne(curUrl, curMethod, curHeaders, curBody);
+    }
+
+    const duration = Date.now() - startTs;
+    if (!resp || !resp.ok) {
+      try { console.error('[CAPTURE][REPLAY][fail]', (resp && resp.error) || 'unknown'); } catch {}
+      return { ok: false, error: (resp && resp.error) || 'replay failed' };
+    }
+    // 预览正文（尝试按文本输出）
+    let preview = '';
+    try {
+      const ct = resp.headers && (resp.headers['content-type'] || resp.headers['Content-Type']) || '';
+      const isText = this._isProbablyText(ct);
+      if (isText) {
+        preview = resp.body.toString('utf8');
+        if (this._isJsonLike(ct)) {
+          try { preview = JSON.stringify(JSON.parse(preview), null, 2); } catch {}
+        }
+        if (preview.length > 1024 * 1024) preview = preview.slice(0, 1024 * 1024);
+      } else {
+        preview = `(binary ${resp.body.length} bytes)`;
+      }
+    } catch { preview = ''; }
+
+    const result = {
+      ok: true,
+      data: {
+        status: resp.status,
+        headers: resp.headers,
+        bodyPreview: preview,
+        url: curUrl,
+        method: curMethod,
+        duration
+      }
+    };
+    try { if (!this.isQuiet) console.log('[CAPTURE][REPLAY][done]', { status: result.data.status, duration: result.data.duration, url: result.data.url }); } catch {}
+    return result;
+  }
 }
 
 module.exports = { CaptureProxyService };

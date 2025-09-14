@@ -150,6 +150,36 @@
       const ok = ret && (ret.ok || (ret.data && ret.data.ok));
       if (ok) toast('已禁用系统代理'); else toast('禁用系统代理失败');
     });
+    el('btnCopyCurl').addEventListener('click', async ()=>{
+      try {
+        if (!selectedId) { toast('请先选择一条请求'); return; }
+        const s = await window.MT.invoke('capture.toCurl', { id: selectedId });
+        await window.MT.clipboard.writeText(s||'');
+        toast('已复制 cURL');
+      } catch (e) { toast('复制失败'); }
+    });
+    el('btnReplay').addEventListener('click', async ()=>{
+      try {
+        if (!selectedId) { toast('请先选择一条请求'); return; }
+        const r = await window.MT.invoke('capture.replay', { id: selectedId, followRedirects: true });
+        const data = (r && r.data) ? r.data : r; // invoke 会在 ok=true 时直接返回 data
+        if (data && (data.status !== undefined)) {
+          const h = JSON.stringify(data.headers||{}, null, 2);
+          const lines = [
+            `# 重放结果 ${data.status} (${data.duration}ms)`,
+            `URL: ${data.url}`,
+            '',
+            '## Response Headers', h,
+            '',
+            '## Response Body', String(data.bodyPreview||'')
+          ];
+          detailBox().textContent = lines.join('\n');
+          toast('重放完成');
+        } else {
+          toast('重放失败');
+        }
+      } catch (e) { toast('重放失败'); }
+    });
     el('btnClear').addEventListener('click', clearAll);
     el('btnExport').addEventListener('click', exportHar);
     el('btnInstallCert').addEventListener('click', installCert);

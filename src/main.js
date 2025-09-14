@@ -948,6 +948,10 @@ class MiniToolbox {
             try { const ret = await this.captureProxy.enableSystemProxy(payload || {}); return { ok: ret && ret.ok, data: ret, error: ret && ret.ok ? undefined : (ret && ret.error) || 'enable failed' }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
           case 'capture.disableSystemProxy':
             try { const ret = await this.captureProxy.disableSystemProxy(); return { ok: ret && ret.ok, data: ret, error: ret && ret.ok ? undefined : 'disable failed' }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          case 'capture.toCurl':
+            try { const s = await this.captureProxy.toCurl(payload || {}); return { ok: true, data: s }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          case 'capture.replay':
+            try { const r = await this.captureProxy.replay(payload || {}); return r; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
           // DB & Stats 通道（仅允许真实来源插件访问自身命名空间）
           case 'db.put': {
             let { collection, key, value, featureCode: fc } = payload || {};
