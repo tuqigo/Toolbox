@@ -88,7 +88,11 @@
   async function start(){
     const port = Number(el('port').value||8888);
     const targets = el('targets').value.trim();
-    await window.MT.invoke('capture.start', { host: '127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null });
+    const filters = {
+      pathPrefixes: (el('capPrefix') && el('capPrefix').value.trim()) || ''
+    };
+    const delayRules = (el('capDelays') && el('capDelays').value.trim()) || null;
+    await window.MT.invoke('capture.start', { host: '127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null, filters, delayRules });
     await updateStatus();
     toast('代理已启动');
   }
@@ -223,7 +227,11 @@
     try {
       const port = Number(el('port').value||8888);
       const targets = el('targets').value.trim();
-      await window.MT.invoke('capture.start', { host:'127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null });
+      const filters = {
+        pathPrefixes: (el('capPrefix') && el('capPrefix').value.trim()) || ''
+      };
+      const delayRules = (el('capDelays') && el('capDelays').value.trim()) || null;
+      await window.MT.invoke('capture.start', { host:'127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null, filters, delayRules });
       await window.MT.invoke('capture.enableSystemProxy', { host:'127.0.0.1', port });
       toast('已自动启动代理并启用系统代理');
       await updateStatus();

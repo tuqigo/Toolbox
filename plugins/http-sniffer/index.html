@@ -65,6 +65,10 @@
       <input id="port" type="number" value="8888" class="input" style="width:100px"/>
       <label>目标域</label>
       <input id="targets" type="text" class="input" placeholder="example.com,*.foo.com" style="width:240px"/>
+      <label>路径前缀</label>
+      <input id="capPrefix" type="text" class="input" placeholder="/api,/v1" style="width:200px"/>
+      <label>延迟规则</label>
+      <input id="capDelays" type="text" class="input" placeholder="POST:/api/foo=5000;/bar=2000" style="width:240px"/>
       <button id="btnApplyTargets" class="btn" title="应用抓包范围">应用</button>
     </div>
     <button id="btnRefresh" class="btn" title="刷新状态" aria-label="刷新">

@@ -36,6 +36,10 @@ class CaptureProxyService {
     this.idCounter = 0;
     this.startedAt = null;
     this.__ProxyClass = null;
+
+    // 抓包层过滤与延迟规则（新增）
+    this.filters = null;     // { pathPrefixes: string[]|null }
+    this.delayRules = null;  // Array<{ method?:string, prefix:string, delayMs:number }> | string pattern
   }
 
   async ensureDirs() {
@@ -56,6 +60,8 @@ class CaptureProxyService {
     this.maxEntries = Math.max(100, Number(opts.maxEntries || 2000));
     this.keepBodies = opts.recordBody !== false;
     this.targetHosts = this._normalizeTargetHosts(opts.targets); // string|array|null
+    this.filters = this._normalizeFilters(opts.filters || null);
+    this.delayRules = this._normalizeDelayRules(opts.delayRules || null);
 
     if (!this.__ProxyClass) this.__ProxyClass = await __loadProxyClass(this.isQuiet);
     this.proxy = new this.__ProxyClass();
@@ -66,27 +72,11 @@ class CaptureProxyService {
     });
 
     // 仅当命中过滤时才进入详细记录
-    const shouldCapture = (ctx) => {
-      try {
-        const host = this._getHost(ctx);
-        if (!host) return false;
-        if (!this.targetHosts || this.targetHosts.size === 0) return true;
-        const h = host.toLowerCase();
-        for (const t of this.targetHosts) {
-          if (!t) continue;
-          if (t.startsWith('*.')) {
-            const bare = t.slice(2); // example.com
-            if (h === bare || h.endsWith('.' + bare)) return true;
-          } else {
-            if (h === t) return true;
-            if (h.endsWith('.' + t)) return true; // example.com 匹配其子域
-          }
-        }
-        return false;
-      } catch { return false; }
-    };
+    const shouldCapture = (ctx) => this._shouldCaptureCtx(ctx);
 
     this.proxy.onRequest((ctx, next) => {
+      // 无论是否记录，先计算是否需要延迟
+      try { if (ctx.__mtDelayMs == null) ctx.__mtDelayMs = this._matchDelay(ctx) || 0; } catch {}
       if (!shouldCapture(ctx)) return next();
       try {
         const id = ++this.idCounter;
@@ -134,15 +124,23 @@ class CaptureProxyService {
     }
 
     this.proxy.onResponse((ctx, next) => {
-      if (!ctx.__mtRecord) return next();
-      try {
-        ctx.__mtRecord.status = (ctx.serverToProxyResponse && ctx.serverToProxyResponse.statusCode) || 0;
-        ctx.__mtRecord.respHeaders = { ...(ctx.serverToProxyResponse && ctx.serverToProxyResponse.headers || {}) };
-        // 记录 mime
-        const ct = ctx.__mtRecord.respHeaders['content-type'] || ctx.__mtRecord.respHeaders['Content-Type'];
-        if (ct) ctx.__mtRecord.mime = String(ct).split(';')[0].trim();
-      } catch {}
-      next();
+      const proceed = () => {
+        if (!ctx.__mtRecord) return next();
+        try {
+          ctx.__mtRecord.status = (ctx.serverToProxyResponse && ctx.serverToProxyResponse.statusCode) || 0;
+          ctx.__mtRecord.respHeaders = { ...(ctx.serverToProxyResponse && ctx.serverToProxyResponse.headers || {}) };
+          // 记录 mime
+          const ct = ctx.__mtRecord.respHeaders['content-type'] || ctx.__mtRecord.respHeaders['Content-Type'];
+          if (ct) ctx.__mtRecord.mime = String(ct).split(';')[0].trim();
+        } catch {}
+        next();
+      };
+      const d = Number(ctx.__mtDelayMs || 0);
+      if (d > 0) {
+        try { if (!this.isQuiet) console.log('[CAPTURE][DELAY]', d, (ctx.__mtRecord && ctx.__mtRecord.path) || (ctx && ctx.clientToProxyRequest && ctx.clientToProxyRequest.url) || ''); } catch {}
+        return setTimeout(proceed, d);
+      }
+      proceed();
     });
 
     if (this.keepBodies) {
@@ -545,6 +543,121 @@ class CaptureProxyService {
       set.add(v);
     }
     return set;
+  }
+
+  // -------- 新增：抓包层过滤与延迟 --------
+  _normalizeFilters(filters) {
+    if (!filters) return null;
+    const out = { pathPrefixes: null };
+    try {
+      if (filters.pathPrefixes) {
+        const list = Array.isArray(filters.pathPrefixes) ? filters.pathPrefixes : String(filters.pathPrefixes).split(',');
+        const arr = list.map(x => String(x || '').trim()).filter(Boolean);
+        if (arr.length) out.pathPrefixes = arr;
+      }
+    } catch {}
+    if (!out.pathPrefixes) return null;
+    return out;
+  }
+
+  _shouldCaptureCtx(ctx) {
+    try {
+      const needHostFilter = !!(this.targetHosts && this.targetHosts.size > 0);
+      const host = this._getHost(ctx) || '';
+      // host 过滤（仅当配置了目标域时才启用）
+      if (needHostFilter) {
+        if (!host) return false;
+        const h = host.toLowerCase();
+        let hostOk = false;
+        for (const t of this.targetHosts) {
+          if (!t) continue;
+          if (t.startsWith('*.')) {
+            const bare = t.slice(2);
+            if (h === bare || h.endsWith('.' + bare)) { hostOk = true; break; }
+          } else {
+            if (h === t || h.endsWith('.' + t)) { hostOk = true; break; }
+          }
+        }
+        if (!hostOk) return false;
+      }
+
+      const f = this.filters;
+      if (!f) return true;
+
+      const req = ctx && ctx.clientToProxyRequest || {};
+      const urlRaw = req.url || '/';
+      let pathOnly = '/';
+      try {
+        if (String(urlRaw).startsWith('/')) {
+          pathOnly = urlRaw;
+        } else if (/^https?:/i.test(String(urlRaw))) {
+          const u = new URL(urlRaw);
+          pathOnly = u.pathname + (u.search || '');
+        } else {
+          // 例如 CONNECT 或 host:port，直接使用原值（此时大概率不会命中 path 前缀）
+          pathOnly = urlRaw;
+        }
+      } catch { pathOnly = urlRaw; }
+
+      if (f.pathPrefixes && f.pathPrefixes.length) {
+        let ok = f.pathPrefixes.some(p => pathOnly.startsWith(p));
+        if (!ok) return false;
+      }
+
+      return true;
+    } catch { return false; }
+  }
+
+  // 已移除来源判定
+
+  _normalizeDelayRules(rules) {
+    if (!rules) return null;
+    if (Array.isArray(rules)) {
+      const out = [];
+      for (const r of rules) {
+        if (!r) continue;
+        const prefix = String(r.prefix || '').trim();
+        const delayMs = Math.max(0, Number(r.delayMs || r.delay || 0));
+        const method = r.method ? String(r.method).toUpperCase() : null;
+        if (prefix && delayMs >= 0) out.push({ prefix, delayMs, method });
+      }
+      return out.length ? out : null;
+    }
+    const s = String(rules).trim();
+    if (!s) return null;
+    const out = [];
+    const parts = s.split(';');
+    for (const part of parts) {
+      const seg = String(part || '').trim();
+      if (!seg) continue;
+      const [lhs, rhs] = seg.split('=');
+      const delayMs = Math.max(0, Number(rhs || 0));
+      let method = null, prefix = String(lhs || '').trim();
+      const colonIdx = prefix.indexOf(':');
+      if (colonIdx > 0) {
+        method = String(prefix.slice(0, colonIdx)).toUpperCase();
+        prefix = prefix.slice(colonIdx + 1);
+      }
+      if (prefix) out.push({ prefix, delayMs, method });
+    }
+    return out.length ? out : null;
+  }
+
+  _matchDelay(ctx) {
+    try {
+      if (!this.delayRules || !this.delayRules.length) return 0;
+      const req = ctx.clientToProxyRequest || {};
+      const method = String(req.method || '').toUpperCase();
+      const host = this._getHost(ctx) || '';
+      const urlRaw = req.url || '/';
+      let path = '/';
+      try { path = new URL(urlRaw, (ctx.isSSL ? 'https://' : 'http://') + host).pathname + (new URL(urlRaw, 'http://x').search || ''); } catch { path = urlRaw; }
+      for (const r of this.delayRules) {
+        if (r.method && r.method !== method) continue;
+        if (path.startsWith(r.prefix)) return Number(r.delayMs || 0);
+      }
+      return 0;
+    } catch { return 0; }
   }
 
   _normalizeQuery(query) {
