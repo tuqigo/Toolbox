@@ -21,12 +21,18 @@
     * { box-sizing: border-box; }
     body { margin: 0; font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial, PingFang SC, Microsoft Yahei, sans-serif; background: var(--bg); color: var(--fg); }
     .appbar { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: linear-gradient(180deg, #121622, #0f131c); position: sticky; top: 0; z-index: 2; }
+    .toast { position: fixed; right: 16px; bottom: 16px; background: #111927; border: 1px solid var(--border); color: var(--fg); padding: 10px 12px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.35); display: none; z-index: 9; }
+    .toast.show { display: block; animation: fade .2s ease; }
+    @keyframes fade { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: translateY(0);} }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: #273041; border-radius: 6px; border: 2px solid #0f141d; }
+    ::-webkit-scrollbar-track { background: #0b0f16; }
     .appbar .title { font-weight: 600; letter-spacing: 0.2px; }
     .pill { padding: 4px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); }
     .pill.ok { background: rgba(60,200,107,0.12); color: var(--ok); border-color: rgba(60,200,107,0.28); }
     .pill.bad { background: rgba(255,107,107,0.12); color: var(--bad); border-color: rgba(255,107,107,0.28); }
     .spacer { flex: 1; }
-    .btn { height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--fg); cursor: pointer; transition: .15s ease; }
+    .btn { height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--fg); cursor: pointer; transition: .15s ease; display: inline-flex; align-items: center; gap: 6px; }
     .btn:hover { border-color: #2f3647; background: #1a2130; }
     .btn.primary { background: #1a3b7a; border-color: #214992; color: #cfe0ff; }
     .btn.primary:hover { background: #1d448e; }
@@ -52,24 +58,42 @@
   <div class="appbar">
     <div class="title">HTTP 抓包</div>
     <div id="pillRunning" class="pill">未运行</div>
+    <div id="pillCert" class="pill">证书未安装</div>
     <div class="spacer"></div>
+    <button id="btnRefresh" class="btn" title="刷新状态" aria-label="刷新">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35A7.95 7.95 0 0012 4a8 8 0 108 8h-2a6 6 0 11-6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+      <span class="btn-text">刷新</span>
+    </button>
     <button id="btnInstallCert" class="btn" title="安装根证书（当前用户-受信任的根）">安装证书</button>
     <button id="btnClear" class="btn">清空</button>
     <button id="btnExport" class="btn">导出 HAR</button>
   </div>
   <div class="toolbar">
     <div class="group">
-      <button id="btnStart" class="btn primary">启动</button>
-      <button id="btnStop" class="btn">停止</button>
+      <button id="btnStart" class="btn primary" title="启动代理" aria-label="启动">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+        <span class="btn-text">启动</span>
+      </button>
+      <button id="btnStop" class="btn" title="停止代理" aria-label="停止">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h12v12H6z"/></svg>
+        <span class="btn-text">停止</span>
+      </button>
       <div class="spacer" style="width:6px"></div>
-      <button id="btnEnableSys" class="btn">启用系统代理</button>
-      <button id="btnDisableSys" class="btn">禁用系统代理</button>
+      <button id="btnEnableSys" class="btn" title="启用系统代理" aria-label="启用系统代理">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10 17l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+        <span class="btn-text">启用</span>
+      </button>
+      <button id="btnDisableSys" class="btn" title="禁用系统代理" aria-label="禁用系统代理">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13H5v-2h14v2z"/></svg>
+        <span class="btn-text">禁用</span>
+      </button>
     </div>
     <div class="group">
       <label>端口</label>
       <input id="port" type="number" value="8888" class="input" style="width:100px"/>
       <label>目标域</label>
       <input id="targets" type="text" class="input" placeholder="example.com,*.foo.com" style="width:240px"/>
+      <button id="btnApplyTargets" class="btn" title="应用抓包范围">应用</button>
     </div>
     <div class="group">
       <label>方法</label>
@@ -105,6 +129,7 @@
       <div id="detailBox" class="kv">请选择一条请求...</div>
     </div>
   </div>
+  <div id="toast" class="toast"></div>
   <script src="script.js"></script>
 </body>
 </html>

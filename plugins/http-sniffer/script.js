@@ -5,6 +5,7 @@
   const tbody = () => el('tableBody');
   const detailBox = () => el('detailBox');
   const statusEl = () => el('status');
+  const toastEl = () => el('toast');
 
   let timer = null;
   let lastItems = [];
@@ -17,6 +18,7 @@
       const s = await window.MT.invoke('capture.status');
       const d = s || {};
       const pill = document.getElementById('pillRunning');
+      const pillCert = document.getElementById('pillCert');
       if (d.running) {
         pill.textContent = `运行中 ${d.host||'127.0.0.1'}:${d.port}`;
         pill.classList.remove('bad');
@@ -25,6 +27,10 @@
         pill.textContent = '未运行';
         pill.classList.remove('ok');
         pill.classList.add('bad');
+      }
+      if (pillCert) {
+        if (d.certInstalled) { pillCert.textContent = '证书已安装'; pillCert.classList.add('ok'); pillCert.classList.remove('bad'); }
+        else { pillCert.textContent = '证书未安装'; pillCert.classList.add('bad'); pillCert.classList.remove('ok'); }
       }
     }catch(e){ statusEl().textContent = '状态获取失败'; }
   }
@@ -82,15 +88,15 @@
   async function start(){
     const port = Number(el('port').value||8888);
     const targets = el('targets').value.trim();
-    // 强提示
-    if (!confirm('HTTPS 抓包需要在系统中安装并信任自签根证书，请确保用于合法合规目的。是否继续启动代理？')) return;
     await window.MT.invoke('capture.start', { host: '127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null });
     await updateStatus();
+    toast('代理已启动');
   }
 
   async function stop(){
     await window.MT.invoke('capture.stop');
     await updateStatus();
+    toast('代理已停止');
   }
 
   async function clearAll(){
@@ -124,18 +130,25 @@
   function bind(){
     el('btnStart').addEventListener('click', start);
     el('btnStop').addEventListener('click', stop);
+    el('btnRefresh').addEventListener('click', updateStatus);
+    el('btnApplyTargets').addEventListener('click', async ()=>{
+      try {
+        await stop();
+        await start();
+        toast('已应用抓包范围');
+      } catch { toast('应用失败'); }
+    });
     el('btnEnableSys').addEventListener('click', async ()=>{
       const port = Number(el('port').value||8888);
       const ret = await window.MT.invoke('capture.enableSystemProxy', { host:'127.0.0.1', port });
       const ok = ret && (ret.ok || (ret.data && ret.data.ok));
       const state = (ret && ret.data && ret.data.state) || {};
-      if (ok) alert(`已启用系统代理: 127.0.0.1:${port}\n当前状态: enable=${state.enable} server=${state.server}`); else alert('启用失败');
+      if (ok) toast(`已启用系统代理: 127.0.0.1:${port} (enable=${state.enable})`); else toast('启用系统代理失败');
     });
     el('btnDisableSys').addEventListener('click', async ()=>{
       const ret = await window.MT.invoke('capture.disableSystemProxy');
       const ok = ret && (ret.ok || (ret.data && ret.data.ok));
-      const state = (ret && ret.data && ret.data.state) || {};
-      if (ok) alert(`已禁用系统代理\n当前状态: enable=${state.enable} server=${state.server||''}`); else alert('禁用失败');
+      if (ok) toast('已禁用系统代理'); else toast('禁用系统代理失败');
     });
     el('btnClear').addEventListener('click', clearAll);
     el('btnExport').addEventListener('click', exportHar);
@@ -157,6 +170,16 @@
 
   function debounce(fn, wait){ let t=null; return function(){ clearTimeout(t); t=setTimeout(()=>fn.apply(this, arguments), wait); } }
 
+  function toast(msg){
+    try {
+      const t = toastEl();
+      if (!t) return;
+      t.textContent = String(msg||'');
+      t.classList.add('show');
+      setTimeout(()=>{ t.classList.remove('show'); }, 2200);
+    } catch {}
+  }
+
   async function loop(){
     await updateStatus();
     await refreshList();
@@ -166,6 +189,15 @@
   document.addEventListener('DOMContentLoaded', async () => {
     bind();
     await updateStatus();
+    // 自动启动并启用系统代理
+    try {
+      const port = Number(el('port').value||8888);
+      const targets = el('targets').value.trim();
+      await window.MT.invoke('capture.start', { host:'127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null });
+      await window.MT.invoke('capture.enableSystemProxy', { host:'127.0.0.1', port });
+      toast('已自动启动代理并启用系统代理');
+      await updateStatus();
+    } catch (e) { toast('自动启动失败，请手动启动'); }
     loop();
   });
 

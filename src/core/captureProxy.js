@@ -55,12 +55,14 @@ class CaptureProxyService {
         if (!host) return false;
         if (!this.targetHosts || this.targetHosts.size === 0) return true;
         const h = host.toLowerCase();
-        if (this.targetHosts.has(h)) return true;
-        // 支持 *.example.com
         for (const t of this.targetHosts) {
+          if (!t) continue;
           if (t.startsWith('*.')) {
-            const suffix = t.slice(1); // .example.com
-            if (h.endsWith(suffix)) return true;
+            const bare = t.slice(2); // example.com
+            if (h === bare || h.endsWith('.' + bare)) return true;
+          } else {
+            if (h === t) return true;
+            if (h.endsWith('.' + t)) return true; // example.com 匹配其子域
           }
         }
         return false;
@@ -184,10 +186,22 @@ class CaptureProxyService {
       running: this.active,
       port: this.port,
       host: this.host || '127.0.0.1',
-      certInstalled: false, // 需要 installCert 后更新真实状态（下述安装流程）
+      certInstalled: false,
       total: this.records.length,
       since: this.startedAt
     };
+  }
+
+  async getStatus() {
+    const base = this.status();
+    try {
+      const sp = await this.querySystemProxy();
+      base.proxyState = sp;
+    } catch {}
+    try {
+      base.certInstalled = await this.isCertInstalled();
+    } catch { base.certInstalled = false; }
+    return base;
   }
 
   list({ offset = 0, limit = 100, query = {} } = {}) {
@@ -349,6 +363,20 @@ class CaptureProxyService {
     }
     // 其他平台暂时仅返回路径，让用户手动安装
     return { ok: true, path: caPem };
+  }
+
+  async isCertInstalled() {
+    try {
+      if (process.platform !== 'win32') return false;
+      // 优先 PowerShell 查询当前用户根存储 CN 包含 NodeMITMProxyCA
+      const ps = "@(Get-ChildItem -Path Cert:\\CurrentUser\\Root | Where-Object { $_.Subject -like '*Node MITM Proxy CA*' -or $_.Subject -like '*NodeMITMProxyCA*' }).Count";
+      const r = await this._spawnCapture('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps]);
+      const n = parseInt(String((r.stdout||'').trim()), 10);
+      if (!isNaN(n)) return n > 0;
+      // 兜底用 certutil 枚举
+      const cu = await this._spawnCapture('certutil', ['-user', '-store', 'Root']);
+      return /Node\s*MITM\s*Proxy\s*CA|NodeMITMProxyCA/i.test(cu.stdout || '');
+    } catch { return false; }
   }
 
   async _spawnOk(command, args) {

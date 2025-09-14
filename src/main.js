@@ -931,7 +931,7 @@ class MiniToolbox {
           case 'capture.stop':
             try { const ret = await this.captureProxy.stop(); return { ok: true, data: ret }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
           case 'capture.status':
-            try { return { ok: true, data: this.captureProxy.status() }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+            try { return { ok: true, data: await this.captureProxy.getStatus() }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
           case 'capture.list':
             try { return { ok: true, data: this.captureProxy.list(payload || {}) }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
           case 'capture.detail':
@@ -1994,6 +1994,8 @@ class MiniToolbox {
     app.on('before-quit', () => {
       this.stopClipboardMonitoring();
       globalShortcut.unregisterAll();
+      try { this.captureProxy && this.captureProxy.disableSystemProxy && this.captureProxy.disableSystemProxy(); } catch {}
+      try { this.captureProxy && this.captureProxy.stop && this.captureProxy.stop(); } catch {}
       try { if (this.tray) { this.tray.destroy(); this.tray = null; } } catch {}
     });
 
