@@ -93,14 +93,18 @@
     };
     const delayRules = (el('capDelays') && el('capDelays').value.trim()) || null;
     await window.MT.invoke('capture.start', { host: '127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null, filters, delayRules });
+    await window.MT.invoke('capture.enableSystemProxy', { host:'127.0.0.1', port });
+    try { console.info('[HTTP-SNIFFER] start: proxy started and system proxy enabled on 127.0.0.1:%s', port); } catch {}
     await updateStatus();
-    toast('代理已启动');
+    toast('已开启（已启动代理并启用系统代理）');
   }
 
   async function stop(){
     await window.MT.invoke('capture.stop');
+    await window.MT.invoke('capture.disableSystemProxy');
+    try { console.info('[HTTP-SNIFFER] stop: proxy stopped and system proxy disabled'); } catch {}
     await updateStatus();
-    toast('代理已停止');
+    toast('已关闭（已停止代理并禁用系统代理）');
   }
 
   async function clearAll(){
@@ -143,18 +147,7 @@
         toast('已应用抓包范围');
       } catch { toast('应用失败'); }
     });
-    el('btnEnableSys').addEventListener('click', async ()=>{
-      const port = Number(el('port').value||8888);
-      const ret = await window.MT.invoke('capture.enableSystemProxy', { host:'127.0.0.1', port });
-      const ok = ret && (ret.ok || (ret.data && ret.data.ok));
-      const state = (ret && ret.data && ret.data.state) || {};
-      if (ok) toast(`已启用系统代理: 127.0.0.1:${port} (enable=${state.enable})`); else toast('启用系统代理失败');
-    });
-    el('btnDisableSys').addEventListener('click', async ()=>{
-      const ret = await window.MT.invoke('capture.disableSystemProxy');
-      const ok = ret && (ret.ok || (ret.data && ret.data.ok));
-      if (ok) toast('已禁用系统代理'); else toast('禁用系统代理失败');
-    });
+    // 系统代理开关已集成到开启/关闭按钮
     el('btnCopyCurl').addEventListener('click', async ()=>{
       try {
         if (!selectedId) { toast('请先选择一条请求'); return; }
@@ -219,7 +212,7 @@
       if (!t) return;
       t.textContent = String(msg||'');
       t.classList.add('show');
-      setTimeout(()=>{ t.classList.remove('show'); }, 2200);
+      setTimeout(()=>{ t.classList.remove('show'); }, 3200);
     } catch {}
   }
 
@@ -257,20 +250,10 @@
   document.addEventListener('DOMContentLoaded', async () => {
     bind();
     await updateStatus();
-    // 自动启动并启用系统代理
     try {
       // 先加载已保存设置并填充输入框
       await loadSettingsAndFillInputs();
-      const port = Number(el('port').value||8888);
-      const targets = el('targets').value.trim();
-      const filters = {
-        pathPrefixes: (el('capPrefix') && el('capPrefix').value.trim()) || ''
-      };
-      const delayRules = (el('capDelays') && el('capDelays').value.trim()) || null;
-      await window.MT.invoke('capture.start', { host:'127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null, filters, delayRules });
-      await window.MT.invoke('capture.enableSystemProxy', { host:'127.0.0.1', port });
-      toast('已自动启动代理并启用系统代理');
-      await updateStatus();
+      await start();
     } catch (e) { toast('自动启动失败，请手动启动'); }
     loop();
   });
