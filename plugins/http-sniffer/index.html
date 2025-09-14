@@ -69,6 +69,11 @@
       <input id="capPrefix" type="text" class="input" placeholder="/api,/v1" style="width:200px"/>
       <label>延迟规则</label>
       <input id="capDelays" type="text" class="input" placeholder="POST:/api/foo=5000;/bar=2000" style="width:240px"/>
+      <label>链式代理</label>
+      <select id="capUpstream" class="select" style="width:120px" title="是否将本代理链到系统代理之上">
+        <option value="system" selected>开启链式</option>
+        <option value="none">关闭链式</option>
+      </select>
       <button id="btnApplyTargets" class="btn" title="应用抓包范围">应用</button>
     </div>
     <button id="btnRefresh" class="btn" title="刷新状态" aria-label="刷新">

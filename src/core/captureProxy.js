@@ -3,6 +3,10 @@ const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
 const zlib = require('zlib');
+// 延迟加载代理 Agent，避免冷启动硬依赖
+let __HttpProxyAgent = null;
+let __HttpsProxyAgent = null;
+let __SocksProxyAgent = null;
 // 延迟加载 http-mitm-proxy，避免冷启动硬依赖
 
 let __CachedProxyClass = null;
@@ -47,6 +51,10 @@ class CaptureProxyService {
 
     // 系统代理备份文件
     this.proxyBackupFile = path.join(this.captureDir, 'proxy-backup.json');
+
+    // 链式上游代理配置
+    this.upstream = null; // { http?:string, https?:string, bypass?:string } | 'system' | null
+    this._upAgents = null; // { http:Agent, https:Agent }
   }
 
   async ensureDirs() {
@@ -69,6 +77,13 @@ class CaptureProxyService {
     this.targetHosts = this._normalizeTargetHosts(opts.targets); // string|array|null
     this.filters = this._normalizeFilters(opts.filters || null);
     this.delayRules = this._normalizeDelayRules(opts.delayRules || null);
+    this.upstream = this._normalizeUpstream(opts.upstream || 'system');
+    if (this.upstream) {
+      await this._prepareUpstreamAgents({ plannedHost: host, plannedPort: port });
+    } else {
+      // 关闭链式上游：清空上游 Agent，回到直连
+      this._upAgents = null;
+    }
 
     if (!this.__ProxyClass) this.__ProxyClass = await __loadProxyClass(this.isQuiet);
     // 仅在非开发环境抑制 http-mitm-proxy 的噪声日志
@@ -87,6 +102,22 @@ class CaptureProxyService {
     this.proxy.onRequest((ctx, next) => {
       // 无论是否记录，先计算是否需要延迟
       try { if (ctx.__mtDelayMs == null) ctx.__mtDelayMs = this._matchDelay(ctx) || 0; } catch {}
+      // 链式上游：按 bypass 决定是否给本次请求设置上游 agent
+      try {
+        if (this._upAgents && (this._upAgents.http || this._upAgents.https)) {
+          const host = this._getHost(ctx) || '';
+          const shouldBypass = this._isBypassHost(host, this.upstream && this.upstream.bypass);
+          if (!shouldBypass) {
+            // ctx.proxyToServerRequestOptions 还未生成，这里挂个标记交由 onRequestHeaders 里应用
+            ctx.__mtUpAgentMark = true;
+            // 若 options 已经存在（按库实现顺序通常已经存在），则直接注入，双保险
+            if (ctx.proxyToServerRequestOptions) {
+              const agent = ctx.isSSL ? this._upAgents.https : this._upAgents.http;
+              if (agent) ctx.proxyToServerRequestOptions.agent = agent;
+            }
+          }
+        }
+      } catch {}
       if (!shouldCapture(ctx)) return next();
       try {
         const id = ++this.idCounter;
@@ -122,6 +153,17 @@ class CaptureProxyService {
         this._pushRecord(item);
       } catch {}
       next();
+    });
+
+    // 在 headers 阶段设置 agent（此时 options 已构建但请求未发出）
+    this.proxy.onRequestHeaders((ctx, callback) => {
+      try {
+        if (ctx.__mtUpAgentMark && ctx.proxyToServerRequestOptions && this._upAgents) {
+          const agent = ctx.isSSL ? this._upAgents.https : this._upAgents.http;
+          if (agent) ctx.proxyToServerRequestOptions.agent = agent;
+        }
+      } catch {}
+      callback();
     });
 
     if (this.keepBodies) {
@@ -196,15 +238,27 @@ class CaptureProxyService {
   }
 
   async stop() {
-    if (!this.active) return { ok: true };
+    const curHost = this.host || '127.0.0.1';
+    const curPort = this.port;
+    const wasActive = this.active;
     try {
-      this.proxy && this.proxy.close();
+      if (this.proxy) this.proxy.close();
     } catch {}
     this.active = false;
     this.port = null;
     this.startedAt = null;
     // 恢复 console.debug
     this._restoreMitmDebug();
+    // 兜底：若系统代理仍指向我们自己，则恢复备份
+    try {
+      if (wasActive && curPort) {
+        const st = await this.querySystemProxy();
+        const selfAddr = `${curHost}:${curPort}`;
+        if (st && st.enable === 1 && String(st.server || '') === selfAddr) {
+          await this._restoreProxyBackup();
+        }
+      }
+    } catch {}
     return { ok: true };
   }
 
@@ -764,6 +818,164 @@ class CaptureProxyService {
       }
       return 0;
     } catch { return 0; }
+  }
+
+  // -------- 链式上游：解析与准备 --------
+  _normalizeUpstream(up) {
+    try {
+      if (!up || up === 'none') return null;
+      if (up === 'system') {
+        // 读取当前系统代理作为上游
+        // 注意：此处仅标记，实际地址在 _prepareUpstreamAgents 内通过 querySystemProxy 获取
+        return { useSystem: true };
+      }
+      if (typeof up === 'string') {
+        return { http: up, https: up };
+      }
+      if (typeof up === 'object') {
+        const out = {};
+        if (up.http) out.http = String(up.http);
+        if (up.https) out.https = String(up.https);
+        if (up.bypass) out.bypass = String(up.bypass);
+        return Object.keys(out).length ? out : null;
+      }
+    } catch {}
+    return null;
+  }
+
+  async _prepareUpstreamAgents({ plannedHost, plannedPort } = {}) {
+    try {
+      if (!this.upstream) { this._upAgents = null; return; }
+      // 动态加载依赖
+      if (!__HttpProxyAgent) {
+        try { __HttpProxyAgent = require('http-proxy-agent'); } catch {}
+      }
+      if (!__HttpsProxyAgent) {
+        try { __HttpsProxyAgent = require('https-proxy-agent'); } catch {}
+      }
+      if (!__SocksProxyAgent) {
+        try { __SocksProxyAgent = require('socks-proxy-agent'); } catch {}
+      }
+      if (!__HttpProxyAgent || !__HttpsProxyAgent) { this._upAgents = null; return; }
+
+      let httpUrl = null, httpsUrl = null, bypass = null;
+      if (this.upstream.useSystem) {
+        const st = await this.querySystemProxy();
+        let serverStr = st.server || '';
+        let overrideStr = st.override || '';
+        try {
+          // 若备份存在且 last.ourServer 是当前代理地址，则优先使用 original 作为上游
+          const backup = await this._loadProxyBackup();
+          const our = `${plannedHost||'127.0.0.1'}:${plannedPort||this.port||''}`;
+          if (backup && backup.original && backup.last && backup.last.ourServer === our && backup.original.server) {
+            serverStr = backup.original.server || serverStr;
+            if (backup.original.override) overrideStr = backup.original.override;
+          }
+        } catch {}
+        const parsed = this._parseWindowsProxyServer(serverStr);
+        httpUrl = parsed.http || parsed.all || null;
+        httpsUrl = parsed.https || parsed.all || null;
+        bypass = overrideStr || null;
+      } else {
+        httpUrl = this.upstream.http || this.upstream.all || null;
+        httpsUrl = this.upstream.https || this.upstream.all || null;
+        bypass = this.upstream.bypass || null;
+      }
+      // 统一成带协议的 URL
+      const normalizeUrl = (u) => {
+        if (!u) return null;
+        const s = String(u).trim();
+        if (/^socks/i.test(s)) return s; // socks:// or socks5://
+        if (/^https?:\/\//i.test(s)) return s;
+        return 'http://' + s; // 兼容 host:port
+      };
+      httpUrl = normalizeUrl(httpUrl);
+      httpsUrl = normalizeUrl(httpsUrl);
+
+      // 如果系统代理就是我们自己（避免自连接回环），则不设置上游
+      const selfAddr = `${plannedHost||'127.0.0.1'}:${plannedPort||this.port||''}`;
+      const isSelf = (u) => {
+        try { const m = String(u||'').match(/:\/\/(.+)$/); const addr = (m?m[1]:String(u)).replace(/^\[|\]$/g,''); return addr === selfAddr; } catch { return false; }
+      };
+      if ((httpUrl && isSelf(httpUrl)) || (httpsUrl && isSelf(httpsUrl))) {
+        httpUrl = null; httpsUrl = null;
+      }
+
+      // 构造 Agent（支持 socks 上游），兼容不同导出形态
+      const HttpProxyAgentCtor = (__HttpProxyAgent && (__HttpProxyAgent.HttpProxyAgent || __HttpProxyAgent)) || null;
+      const HttpsProxyAgentCtor = (__HttpsProxyAgent && (__HttpsProxyAgent.HttpsProxyAgent || __HttpsProxyAgent)) || null;
+      const SocksProxyAgentCtor = (__SocksProxyAgent && (__SocksProxyAgent.SocksProxyAgent || __SocksProxyAgent)) || null;
+
+      const makeAgent = (u, isHttps) => {
+        if (!u) return null;
+        if (/^socks/i.test(u) && SocksProxyAgentCtor) return new SocksProxyAgentCtor(u);
+        if (isHttps && HttpsProxyAgentCtor) return new HttpsProxyAgentCtor(u);
+        if (!isHttps && HttpProxyAgentCtor) return new HttpProxyAgentCtor(u);
+        return null;
+      };
+
+      const httpAgent = makeAgent(httpUrl, false);
+      const httpsAgent = makeAgent(httpsUrl, true);
+      this._upAgents = { http: httpAgent || httpsAgent, https: httpsAgent || httpAgent };
+      if (bypass) this.upstream.bypass = bypass;
+      try { if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM] prepared', { http: httpUrl||null, https: httpsUrl||null, bypass }); } catch {}
+    } catch (e) {
+      this._upAgents = null;
+      try { if (!this.isQuiet) console.warn('[CAPTURE][UPSTREAM][err]', e && e.message); } catch {}
+    }
+  }
+
+  _parseWindowsProxyServer(s) {
+    const out = { all: null, http: null, https: null, ftp: null, socks: null };
+    try {
+      const str = String(s || '').trim();
+      if (!str) return out;
+      if (str.includes('=')) {
+        const parts = str.split(';');
+        parts.forEach(p => {
+          const seg = String(p || '').trim();
+          if (!seg) return;
+          const [k, v] = seg.split('=');
+          const key = String(k || '').toLowerCase();
+          const val = String(v || '').trim();
+          if (!val) return;
+          if (key === 'http') out.http = val;
+          else if (key === 'https') out.https = val;
+          else if (key === 'socks') out.socks = val;
+          else if (key === 'ftp') out.ftp = val;
+        });
+      } else {
+        out.all = str;
+      }
+    } catch {}
+    return out;
+  }
+
+  _isBypassHost(host, bypassList) {
+    try {
+      if (!bypassList) return false;
+      const raw = String(bypassList || '').trim();
+      if (!raw) return false;
+      const entries = raw.split(';').map(s => String(s || '').trim()).filter(Boolean);
+      const h = String(host || '').toLowerCase();
+      for (const e of entries) {
+        const rule = e.toLowerCase();
+        if (rule === '<local>') {
+          if (!h.includes('.')) return true; // 无点认为本地域名
+          continue;
+        }
+        if (rule.startsWith('*')) {
+          const suf = rule.slice(1);
+          if (h.endsWith(suf)) return true;
+        } else if (rule.endsWith('*')) {
+          const pre = rule.slice(0, -1);
+          if (h.startsWith(pre)) return true;
+        } else if (h === rule) {
+          return true;
+        }
+      }
+      return false;
+    } catch { return false; }
   }
 
   _silenceMitmDebug() {

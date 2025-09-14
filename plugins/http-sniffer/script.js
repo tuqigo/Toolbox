@@ -92,14 +92,19 @@
       pathPrefixes: (el('capPrefix') && el('capPrefix').value.trim()) || ''
     };
     const delayRules = (el('capDelays') && el('capDelays').value.trim()) || null;
-    await window.MT.invoke('capture.start', { host: '127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null, filters, delayRules });
+    const upstreamSel = (el('capUpstream') && el('capUpstream').value) || 'system';
+    const upstream = upstreamSel === 'none' ? 'none' : 'system';
+    await window.MT.invoke('capture.start', { host: '127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null, filters, delayRules, upstream });
     await updateStatus();
+    await refreshList();
     toast('代理已启动');
   }
 
   async function stop(){
     await window.MT.invoke('capture.stop');
     await updateStatus();
+    await refreshList();
+    detailBox().textContent = '请选择一条请求...';
     toast('代理已停止');
   }
 
@@ -140,6 +145,7 @@
         await saveSettings();
         await stop();
         await start();
+        await refreshList();
         toast('已应用抓包范围');
       } catch { toast('应用失败'); }
     });
@@ -148,12 +154,14 @@
       const ret = await window.MT.invoke('capture.enableSystemProxy', { host:'127.0.0.1', port });
       const ok = ret && (ret.ok || (ret.data && ret.data.ok));
       const state = (ret && ret.data && ret.data.state) || {};
-      if (ok) toast(`已启用系统代理: 127.0.0.1:${port} (enable=${state.enable})`); else toast('启用系统代理失败');
+      if (ok) { toast(`已启用系统代理: 127.0.0.1:${port} (enable=${state.enable})`); await refreshList(); }
+      else toast('启用系统代理失败');
     });
     el('btnDisableSys').addEventListener('click', async ()=>{
       const ret = await window.MT.invoke('capture.disableSystemProxy');
       const ok = ret && (ret.ok || (ret.data && ret.data.ok));
-      if (ok) toast('已禁用系统代理'); else toast('禁用系统代理失败');
+      if (ok) { toast('已禁用系统代理'); await refreshList(); }
+      else toast('禁用系统代理失败');
     });
     el('btnCopyCurl').addEventListener('click', async ()=>{
       try {
@@ -267,10 +275,13 @@
         pathPrefixes: (el('capPrefix') && el('capPrefix').value.trim()) || ''
       };
       const delayRules = (el('capDelays') && el('capDelays').value.trim()) || null;
-      await window.MT.invoke('capture.start', { host:'127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null, filters, delayRules });
+      const upstreamSel = (el('capUpstream') && el('capUpstream').value) || 'system';
+      const upstream = upstreamSel === 'none' ? 'none' : 'system';
+      await window.MT.invoke('capture.start', { host:'127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null, filters, delayRules, upstream });
       await window.MT.invoke('capture.enableSystemProxy', { host:'127.0.0.1', port });
       toast('已自动启动代理并启用系统代理');
       await updateStatus();
+      await refreshList();
     } catch (e) { toast('自动启动失败，请手动启动'); }
     loop();
   });
