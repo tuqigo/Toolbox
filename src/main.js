@@ -2009,6 +2009,8 @@ class MiniToolbox {
       await app.whenReady();
       
       await this.configStore.load();
+      // 启动期保护：若系统代理指向本工具但服务未运行，则自动恢复备份
+      try { this.captureProxy && this.captureProxy.initSystemProxyGuard && await this.captureProxy.initSystemProxyGuard(); } catch {}
       await this.usageStore.load();
       await this.clipboardStore.load();
       

@@ -28,7 +28,7 @@ class ConfigStore {
       
       // UI界面配置
       ui: {
-        theme: 'system',           // 主题: 'system' | 'light' | 'dark'
+        theme: 'dark',           // 主题: 'system' | 'light' | 'dark'
         titlebarHeight: 48,        // 标题栏高度(px): 32, 40, 48, 56
         windowOpacity: 0.95,       // 窗口透明度: 0.8-1.0
         accentColor: '#007AFF',    // 主色调

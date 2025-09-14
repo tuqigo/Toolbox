@@ -44,6 +44,9 @@ class CaptureProxyService {
     // 内部：第三方库调试输出抑制
     this._origConsoleDebug = null;
     this._suppressingMitmLogs = false;
+
+    // 系统代理备份文件
+    this.proxyBackupFile = path.join(this.captureDir, 'proxy-backup.json');
   }
 
   async ensureDirs() {
@@ -335,6 +338,12 @@ class CaptureProxyService {
     const base = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
     try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][enable] target =', server); } catch {}
     const regExe = this._getRegExePath();
+    // 备份当前系统代理
+    try {
+      const st = await this.querySystemProxy();
+      const prev = { enable: st.enable, server: st.server, override: st.override };
+      await this._saveProxyBackup(prev, { ourServer: server });
+    } catch {}
     const steps = [
       { args: ['add', base, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '1', '/f'] },
       { args: ['add', base, '/v', 'ProxyServer', '/t', 'REG_SZ', '/d', server, '/f'] },
@@ -362,12 +371,16 @@ class CaptureProxyService {
     const base = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
     try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable]'); } catch {}
     const regExe = this._getRegExePath();
-    let r = await this._spawnCapture(regExe, ['add', base, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f']);
-    let ok = r && r.code === 0;
-    try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][reg]', regExe, 'add ProxyEnable=0 => code=', r.code, 'stdout=', (r.stdout||'').trim(), 'stderr=', (r.stderr||'').trim()); } catch {}
+    // 优先尝试恢复备份
+    let ok = await this._restoreProxyBackup();
     if (!ok) {
-      const psOk = await this._unsetProxyViaPowerShell();
-      ok = psOk;
+      let r = await this._spawnCapture(regExe, ['add', base, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f']);
+      ok = r && r.code === 0;
+      try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][reg]', regExe, 'add ProxyEnable=0 => code=', r && r.code, 'stdout=', (r && r.stdout||'').trim(), 'stderr=', (r && r.stderr||'').trim()); } catch {}
+      if (!ok) {
+        const psOk = await this._unsetProxyViaPowerShell();
+        ok = psOk;
+      }
     }
     await this._notifyInternetSettingsChanged();
     const state = await this.querySystemProxy();
@@ -425,10 +438,13 @@ class CaptureProxyService {
     const base = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
     const qEnable = await this._spawnCapture('reg', ['query', base, '/v', 'ProxyEnable']);
     const qServer = await this._spawnCapture('reg', ['query', base, '/v', 'ProxyServer']);
+    const qOverride = await this._spawnCapture('reg', ['query', base, '/v', 'ProxyOverride']);
     const enable = /REG_DWORD\s+0x1/i.test(qEnable.stdout || '') ? 1 : 0;
     const serverMatch = (qServer.stdout || '').match(/ProxyServer\s+REG_SZ\s+(.+)$/mi);
     const server = serverMatch ? serverMatch[1].trim() : '';
-    return { supported: true, enable, server, raw: { enable: qEnable, server: qServer } };
+    const overrideMatch = (qOverride.stdout || '').match(/ProxyOverride\s+REG_SZ\s+(.+)$/mi);
+    const override = overrideMatch ? overrideMatch[1].trim() : '';
+    return { supported: true, enable, server, override, raw: { enable: qEnable, server: qServer, override: qOverride } };
   }
 
   async _spawnCapture(command, args) {
@@ -455,6 +471,87 @@ class CaptureProxyService {
       if (fs.existsSync(system32)) return system32;
     } catch {}
     return 'reg';
+  }
+
+  // -------- 备份/恢复系统代理 --------
+  async initSystemProxyGuard() {
+    try {
+      await this.ensureDirs();
+      const st = await this.querySystemProxy();
+      await this._maybeSnapshotBackup(st);
+      // 若系统代理指向我们但服务未运行，尝试恢复
+      if (!this.active) {
+        const backup = await this._loadProxyBackup();
+        const our = backup && backup.last && backup.last.ourServer;
+        if (st && st.enable === 1 && our && st.server === our) {
+          const ok = await this._restoreProxyBackup();
+          try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][startup-repair]', { ok, from: st.server }); } catch {}
+          if (!ok) {
+            await this._unsetProxyViaPowerShell();
+            await this._notifyInternetSettingsChanged();
+          }
+        }
+      }
+    } catch (e) {
+      try { if (!this.isQuiet) console.warn('[CAPTURE][SYS-PROXY][guard][err]', e && e.message); } catch {}
+    }
+  }
+
+  async _maybeSnapshotBackup(state) {
+    try {
+      const exists = await fs.pathExists(this.proxyBackupFile);
+      if (exists) return;
+      if (!state) state = await this.querySystemProxy();
+      const original = { enable: state.enable, server: state.server, override: state.override };
+      const data = { original, last: null };
+      await fs.writeJson(this.proxyBackupFile, data, { spaces: 2 });
+      try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][backup][snapshot]', data); } catch {}
+    } catch {}
+  }
+
+  async _saveProxyBackup(originalState, { ourServer } = {}) {
+    try {
+      const exists = await fs.pathExists(this.proxyBackupFile);
+      let data = exists ? await fs.readJson(this.proxyBackupFile) : null;
+      if (!data || !data.original) {
+        data = { original: { enable: originalState && originalState.enable, server: originalState && originalState.server, override: originalState && originalState.override }, last: null };
+      }
+      data.last = { setBy: 'MiniToolbox', ourServer: String(ourServer || ''), at: Date.now() };
+      await fs.writeJson(this.proxyBackupFile, data, { spaces: 2 });
+      try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][backup][save]', data); } catch {}
+    } catch {}
+  }
+
+  async _loadProxyBackup() {
+    try { if (await fs.pathExists(this.proxyBackupFile)) return await fs.readJson(this.proxyBackupFile); } catch {}
+    return null;
+  }
+
+  async _restoreProxyBackup() {
+    try {
+      const data = await this._loadProxyBackup();
+      if (!data || !data.original) return false;
+      const orig = data.original;
+      const ok = await this._setProxyRegistry({ enable: orig.enable, server: orig.server, override: orig.override });
+      await this._notifyInternetSettingsChanged();
+      return ok;
+    } catch { return false; }
+  }
+
+  async _setProxyRegistry({ enable, server, override }) {
+    try {
+      const base = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
+      const regExe = this._getRegExePath();
+      const steps = [];
+      if (enable != null) steps.push(['add', base, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', String(Number(!!enable)), '/f']);
+      if (server != null) steps.push(['add', base, '/v', 'ProxyServer', '/t', 'REG_SZ', '/d', String(server), '/f']);
+      if (override != null) steps.push(['add', base, '/v', 'ProxyOverride', '/t', 'REG_SZ', '/d', String(override), '/f']);
+      for (const args of steps) {
+        const r = await this._spawnCapture(regExe, args);
+        if (!(r && r.code === 0)) return false;
+      }
+      return true;
+    } catch { return false; }
   }
 
   async _setProxyViaPowerShell({ host = '127.0.0.1', port }) {
