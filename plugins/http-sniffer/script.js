@@ -137,6 +137,7 @@
     el('btnRefresh').addEventListener('click', updateStatus);
     el('btnApplyTargets').addEventListener('click', async ()=>{
       try {
+        await saveSettings();
         await stop();
         await start();
         toast('已应用抓包范围');
@@ -160,6 +161,14 @@
         const s = await window.MT.invoke('capture.toCurl', { id: selectedId });
         await window.MT.clipboard.writeText(s||'');
         toast('已复制 cURL');
+      } catch (e) { toast('复制失败'); }
+    });
+    el('btnCopyCurlPS').addEventListener('click', async ()=>{
+      try {
+        if (!selectedId) { toast('请先选择一条请求'); return; }
+        const s = await window.MT.invoke('capture.toCurlPS', { id: selectedId });
+        await window.MT.clipboard.writeText(s||'');
+        toast('已复制 cURL(PS)');
       } catch (e) { toast('复制失败'); }
     });
     el('btnReplay').addEventListener('click', async ()=>{
@@ -214,6 +223,31 @@
     } catch {}
   }
 
+  // ====== 设置持久化（仅在“应用”时保存；启动时读取并应用） ======
+  async function saveSettings(){
+    try {
+      if (!window.MT || !window.MT.db) return;
+      const targets = el('targets').value.trim();
+      const pathPrefixes = (el('capPrefix') && el('capPrefix').value.trim()) || '';
+      const settings = { targets, pathPrefixes };
+      await window.MT.db.put('http-sniffer.settings', settings);
+    } catch (e) { try { console.warn('[HTTP-SNIFFER] saveSettings failed', e && e.message); } catch {} }
+  }
+
+  async function loadSettingsAndFillInputs(){
+    try {
+      if (!window.MT || !window.MT.db) return false;
+      const rec = await window.MT.db.get('http-sniffer.settings');
+      const val = rec && (rec.value || rec);
+      if (val && (typeof val === 'object')) {
+        if (val.targets != null) el('targets').value = String(val.targets || '');
+        if (val.pathPrefixes != null && el('capPrefix')) el('capPrefix').value = String(val.pathPrefixes || '');
+        return true;
+      }
+      return false;
+    } catch (e) { try { console.warn('[HTTP-SNIFFER] loadSettings failed', e && e.message); } catch {} return false; }
+  }
+
   async function loop(){
     await updateStatus();
     await refreshList();
@@ -225,6 +259,8 @@
     await updateStatus();
     // 自动启动并启用系统代理
     try {
+      // 先加载已保存设置并填充输入框
+      await loadSettingsAndFillInputs();
       const port = Number(el('port').value||8888);
       const targets = el('targets').value.trim();
       const filters = {

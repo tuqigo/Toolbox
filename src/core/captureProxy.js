@@ -40,6 +40,10 @@ class CaptureProxyService {
     // 抓包层过滤与延迟规则（新增）
     this.filters = null;     // { pathPrefixes: string[]|null }
     this.delayRules = null;  // Array<{ method?:string, prefix:string, delayMs:number }> | string pattern
+
+    // 内部：第三方库调试输出抑制
+    this._origConsoleDebug = null;
+    this._suppressingMitmLogs = false;
   }
 
   async ensureDirs() {
@@ -64,6 +68,9 @@ class CaptureProxyService {
     this.delayRules = this._normalizeDelayRules(opts.delayRules || null);
 
     if (!this.__ProxyClass) this.__ProxyClass = await __loadProxyClass(this.isQuiet);
+    // 仅在非开发环境抑制 http-mitm-proxy 的噪声日志
+    const isDev = String(process.env.NODE_ENV || '').toLowerCase() === 'development' || process.env.MT_DEV === '1';
+    if (!isDev) this._silenceMitmDebug();
     this.proxy = new this.__ProxyClass();
 
     // 核心钩子：请求/响应
@@ -193,6 +200,8 @@ class CaptureProxyService {
     this.active = false;
     this.port = null;
     this.startedAt = null;
+    // 恢复 console.debug
+    this._restoreMitmDebug();
     return { ok: true };
   }
 
@@ -660,6 +669,36 @@ class CaptureProxyService {
     } catch { return 0; }
   }
 
+  _silenceMitmDebug() {
+    try {
+      if (this._suppressingMitmLogs) return;
+      const orig = console.debug;
+      const self = this;
+      console.debug = function() {
+        try {
+          const msg = arguments && arguments[0];
+          if (typeof msg === 'string' && /^(creating SNI context for|starting server for|https server started for)/i.test(msg)) {
+            return; // 忽略 http-mitm-proxy 的 HTTPS 子服务器噪声日志
+          }
+        } catch {}
+        try { return orig.apply(console, arguments); } catch {}
+      };
+      this._origConsoleDebug = orig;
+      this._suppressingMitmLogs = true;
+    } catch {}
+  }
+
+  _restoreMitmDebug() {
+    try {
+      if (!this._suppressingMitmLogs) return;
+      if (this._origConsoleDebug) {
+        console.debug = this._origConsoleDebug;
+      }
+    } catch {}
+    this._origConsoleDebug = null;
+    this._suppressingMitmLogs = false;
+  }
+
   _normalizeQuery(query) {
     const q = query || {};
     const r = {};
@@ -821,6 +860,57 @@ class CaptureProxyService {
     const cmd = parts.join(' ');
     try { if (!this.isQuiet) console.log('[CAPTURE][CURL]', { id: rec.id, method, url }); } catch {}
     return cmd;
+  }
+
+  // 生成适配 PowerShell 的 curl 命令（使用 curl.exe，过滤易冲突头，启用 -L 与 --compressed）
+  async toCurlPS({ id, overrides } = {}) {
+    const rec = this.getRecordById(id);
+    if (!rec) return '';
+    const method = String((overrides && overrides.method) || rec.method || 'GET').toUpperCase();
+    const url = this._buildUrl(rec, overrides && overrides.url);
+    const rawHeaders = this._applyHeaderOverrides(rec.reqHeaders, overrides && overrides.headers);
+    const headers = this._sanitizeHeadersForCurlPS(rawHeaders);
+    const bodyBuf = await this._readReqBodyBuffer(rec, overrides && overrides.bodyText);
+
+    const parts = ['curl.exe', '-L'];
+    parts.push('-X', method);
+    parts.push(`"${url}"`);
+    // 强制避免压缩，兼容旧版 curl.exe 无 --compressed
+    try {
+      const hasAccept = headers['Accept'] || headers['accept'];
+      if (!hasAccept) headers['Accept'] = 'text/plain,*/*';
+      headers['Accept-Encoding'] = 'identity';
+    } catch {}
+    Object.keys(headers || {}).forEach(k => {
+      const v = headers[k];
+      parts.push('-H', this._psQuote(`${k}: ${v}`));
+    });
+    if (bodyBuf && bodyBuf.length > 0) {
+      if (bodyBuf.length <= 256 * 1024) {
+        const text = bodyBuf.toString('utf8');
+        parts.push('--data-binary', this._psQuote(text));
+      } else if (rec.reqBodyPath) {
+        parts.push('--data-binary', this._psQuote(`@${rec.reqBodyPath}`));
+      }
+    }
+    const cmd = parts.join(' ');
+    try { if (!this.isQuiet) console.log('[CAPTURE][CURL][PS]', { id: rec.id, method, url }); } catch {}
+    return cmd;
+  }
+
+  _sanitizeHeadersForCurlPS(headers) {
+    try {
+      const h = { ...(headers || {}) };
+      const remove = ['host', 'Host', 'connection', 'Connection', 'accept-encoding', 'Accept-Encoding', 'content-length', 'Content-Length'];
+      remove.forEach(k => { try { delete h[k]; } catch {} });
+      return h;
+    } catch { return headers || {}; }
+  }
+
+  _psQuote(s) {
+    // PowerShell 单引号字符串：内部单引号用两个单引号表示
+    const str = String(s == null ? '' : s);
+    return `'${str.replace(/'/g, "''")}'`;
   }
 
   _shQuote(s) {
