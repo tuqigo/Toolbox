@@ -7,6 +7,9 @@ on:
   push:
     tags: [ 'v*' ]
 
+permissions:
+  contents: write
+
 jobs:
   build-win:
     name: Build on Windows
@@ -45,16 +48,19 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npm run build:win -- --publish=never
 
-      - name: Upload dist artifacts
+      - name: Upload installer (.exe)
         uses: actions/upload-artifact@v4
         with:
-          name: MiniToolbox-Windows
-          path: |
-            dist/*.exe
-            dist/*.7z
-            dist/*.zip
-            dist/*.yml
-            dist/win-*/**
+          name: MiniToolbox-Installer
+          path: dist/*-x64.exe
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload portable (.exe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MiniToolbox-Portable
+          path: dist/*-portable.exe
           if-no-files-found: warn
           retention-days: 7
 
@@ -67,17 +73,14 @@ jobs:
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: MiniToolbox-Windows
           path: dist
+          merge-multiple: true
 
       - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.exe
-            dist/*.7z
-            dist/*.zip
-            dist/*.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
