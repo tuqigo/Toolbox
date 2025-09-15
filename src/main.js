@@ -2003,14 +2003,20 @@ class MiniToolbox {
       event.preventDefault();
     });
 
-    app.on('before-quit', () => {
-      this.stopClipboardMonitoring();
-      globalShortcut.unregisterAll();
-      // 先关闭 PAC，再关闭系统代理，确保脚本模式不会遗留
-      try { this.captureProxy && this.captureProxy.disablePAC && this.captureProxy.disablePAC(); } catch {}
-      try { this.captureProxy && this.captureProxy.disableSystemProxy && this.captureProxy.disableSystemProxy(); } catch {}
-      try { this.captureProxy && this.captureProxy.stop && this.captureProxy.stop(); } catch {}
-      try { if (this.tray) { this.tray.destroy(); this.tray = null; } } catch {}
+    app.on('before-quit', async (event) => {
+      try {
+        // 尽量保证还原系统代理
+        event.preventDefault();
+        this.stopClipboardMonitoring();
+        globalShortcut.unregisterAll();
+        try { if (this.captureProxy && this.captureProxy.disablePAC) await this.captureProxy.disablePAC(); } catch {}
+        try { if (this.captureProxy && this.captureProxy.disableSystemProxy) await this.captureProxy.disableSystemProxy(); } catch {}
+        try { if (this.captureProxy && this.captureProxy.stop) await this.captureProxy.stop(); } catch {}
+        try { if (this.tray) { this.tray.destroy(); this.tray = null; } } catch {}
+      } finally {
+        // 无论成功与否，确保进程退出
+        app.exit(0);
+      }
     });
 
     try {

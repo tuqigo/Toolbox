@@ -179,6 +179,8 @@
     <div style="padding:12px; display:grid; grid-template-columns: 1fr 1fr; gap: 10px;">
       <div class="group"><label>端口</label><input id="port" type="number" value="8888" class="input" style="width:120px"/></div>
       <div class="group"><label>模式</label><select id="mode" class="select"><option value="global">全局</option><option value="pac">PAC</option></select></div>
+      <div class="group"><label>链式代理</label><input id="enableUpstream" type="checkbox" checked/></div>
+      <div class="group"><label>上游地址</label><input id="upstreamAddr" type="text" class="input" placeholder="system / http://127.0.0.1:7890 / socks5://127.0.0.1:10808" value="system" style="width:100%"/></div>
       <div class="group" style="grid-column: span 2;"><label>目标域</label><input id="targets" type="text" class="input" placeholder="example.com,*.foo.com" style="width:100%"/></div>
       <div class="group" style="grid-column: span 2;"><label>路径前缀</label><input id="capPrefix" type="text" class="input" placeholder="/api,/v1" style="width:100%"/></div>
       <div class="group" style="grid-column: span 2;"><label>延迟规则</label><input id="capDelays" type="text" class="input" placeholder="POST:/api/foo=5000;/bar=2000" style="width:100%"/></div>

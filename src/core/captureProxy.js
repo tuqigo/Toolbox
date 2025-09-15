@@ -9,6 +9,10 @@ const crypto = require('crypto');
 // 延迟加载 http-mitm-proxy，避免冷启动硬依赖
 
 let __CachedProxyClass = null;
+// 上游代理依赖（按需使用）
+let __HttpProxyAgentClass = null;
+let __HttpsProxyAgentClass = null;
+let __SocksProxyAgentClass = null;
 
 async function __loadProxyClass(isQuiet) {
   if (__CachedProxyClass) return __CachedProxyClass;
@@ -65,6 +69,15 @@ class CaptureProxyService {
 
     // 改写/断点规则
     this.rewriteRules = null;
+
+    // 链式上游代理
+    this._httpUpstreamAgent = null;
+    this._httpsUpstreamAgent = null;
+    this._upstreamBypass = [];
+    this._ourServer = null; // 形如 host:port
+    this._upstreamHttpUrl = null;
+    this._upstreamHttpsUrl = null;
+    this._upstreamDisabledUntil = 0; // 上游不可用临时熔断
   }
 
   async ensureDirs() {
@@ -89,6 +102,9 @@ class CaptureProxyService {
     this.delayRules = this._normalizeDelayRules(opts.delayRules || null);
     this.maxBodyDirMB = Math.max(64, Number(opts.maxBodyDirMB || this.maxBodyDirMB || 512));
     this.rewriteRules = this._normalizeRewriteRules(opts.rewriteRules || null);
+    // 预生成一次（可能端口稍后会变更，监听完成后再二次确认）
+    try { this._ourServer = `${host}:${port}`; } catch {}
+    try { await this._prepareUpstream(opts.upstream); } catch {}
 
     if (!this.__ProxyClass) this.__ProxyClass = await __loadProxyClass(this.isQuiet);
     // 仅在非开发环境抑制 http-mitm-proxy 的噪声日志
@@ -99,12 +115,49 @@ class CaptureProxyService {
     // 核心钩子：请求/响应
     this.proxy.onError((ctx, err, kind) => {
       try { if (!this.isQuiet) console.error('[CAPTURE][onError]', kind, err && err.message); } catch {}
+      // 若上游错误，触发短暂熔断，避免持续不可达导致页面不通
+      try {
+        const msg = (err && err.message) || '';
+        const transient = /ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|socket hang up/i.test(msg);
+        if (kind && String(kind).includes('PROXY_TO_SERVER_REQUEST_ERROR') && transient) {
+          this._upstreamDisabledUntil = Date.now() + 15000; // 15s 熔断
+          if (!this.isQuiet) console.warn('[CAPTURE][UPSTREAM][disabled]', 'for 15s due to', msg);
+        }
+      } catch {}
     });
 
     // 仅当命中过滤时才进入详细记录
     const shouldCapture = (ctx) => this._shouldCaptureCtx(ctx);
 
     this.proxy.onRequest((ctx, next) => {
+      // 链式上游代理：为每个出站请求按需设置 agent（绕过列表不套用）
+      try {
+        const now = Date.now();
+        const upstreamOk = (this._httpUpstreamAgent || this._httpsUpstreamAgent) && (!this._upstreamDisabledUntil || now >= this._upstreamDisabledUntil);
+        if (upstreamOk) {
+          const host = this._getHost(ctx) || '';
+          if (!this._isBypassedHost(host)) {
+            ctx.proxyToServerRequestOptions = ctx.proxyToServerRequestOptions || {};
+            ctx.proxyToServerRequestOptions.agent = ctx.isSSL ? (this._httpsUpstreamAgent || this._httpUpstreamAgent) : (this._httpUpstreamAgent || this._httpsUpstreamAgent);
+            ctx.__mtUsedUpstream = true;
+            try {
+              const req = ctx && ctx.clientToProxyRequest;
+              const urlRaw = req && req.url || '/';
+              const path = (()=>{ try { return new URL(urlRaw, (ctx.isSSL?'https://':'http://') + host).pathname + (new URL(urlRaw, 'http://x').search||''); } catch { return urlRaw; } })();
+              const u = ctx.isSSL ? (this._upstreamHttpsUrl || this._upstreamHttpUrl) : (this._upstreamHttpUrl || this._upstreamHttpsUrl);
+              if (!this.isQuiet) console.log('[CAPTURE][CHAIN][use] client->MITM->UPSTREAM(%s)->TARGET host=%s path=%s id=%s', u || 'unknown', host, path, (ctx.__mtId||''));
+            } catch {}
+          } else {
+            ctx.__mtUsedUpstream = false;
+            try {
+              const req = ctx && ctx.clientToProxyRequest;
+              const urlRaw = req && req.url || '/';
+              const path = (()=>{ try { return new URL(urlRaw, (ctx.isSSL?'https://':'http://') + host).pathname + (new URL(urlRaw, 'http://x').search||''); } catch { return urlRaw; } })();
+              if (!this.isQuiet) console.log('[CAPTURE][CHAIN][bypass] client->MITM->DIRECT host=%s path=%s id=%s', host, path, (ctx.__mtId||''));
+            } catch {}
+          }
+        }
+      } catch {}
       // 改写/阻断/Mock：优先处理
       try {
         const rule = this._matchRewrite(ctx);
@@ -248,6 +301,10 @@ class CaptureProxyService {
         rec.duration = Math.max(0, rec.tsEnd - (ctx.__mtStart || rec.tsStart));
         // 组装 body
         await this._finalizeBodies(rec, ctx.__mtReqChunks, ctx.__mtRespChunks);
+        try {
+          const used = ctx.__mtUsedUpstream ? (ctx && ctx.isSSL ? (this._upstreamHttpsUrl || this._upstreamHttpUrl) : (this._upstreamHttpUrl || this._upstreamHttpsUrl)) : 'DIRECT';
+          if (!this.isQuiet) console.log('[CAPTURE][CHAIN][done] id=%s status=%s upstream=%s host=%s path=%s', rec.id, rec.status, used, rec.host, rec.path);
+        } catch {}
       } catch (e) {
         try { if (!this.isQuiet) console.warn('[CAPTURE][finalizeBodies][err]', e && e.message); } catch {}
       } finally {
@@ -274,6 +331,9 @@ class CaptureProxyService {
           this.active = true;
           this.startedAt = Date.now();
           if (!this.isQuiet) console.log('[CAPTURE] proxy started', `${host}:${this.port}`, 'caDir=', this.caDir);
+          // 端口可能改变，启动后再根据实际端口重置自连保护与上游代理
+          try { this._ourServer = `${this.host}:${this.port}`; } catch {}
+          try { this._prepareUpstream(opts.upstream); } catch {}
           resolve();
         });
       } catch (e) { reject(e); }
@@ -292,6 +352,15 @@ class CaptureProxyService {
     this.startedAt = null;
     // 恢复 console.debug
     this._restoreMitmDebug();
+    // 额外保护：若系统代理仍指向我们，尝试恢复备份
+    try {
+      const st = await this.querySystemProxy();
+      const our = this._ourServer;
+      if (st && st.enable === 1 && our && st.server === our) {
+        await this._restoreProxyBackup();
+        await this._notifyInternetSettingsChanged();
+      }
+    } catch {}
     return { ok: true };
   }
 
@@ -1523,6 +1592,193 @@ class CaptureProxyService {
     } catch (e) {
       return { ok: false, error: e && e.message || String(e) };
     }
+  }
+
+  // ---------- 上游代理：准备/解析/绕过 ----------
+  async _prepareUpstream(upstream) {
+    try {
+      this._httpUpstreamAgent = null;
+      this._httpsUpstreamAgent = null;
+      this._upstreamBypass = [];
+      this._upstreamDisabledUntil = 0;
+      if (!upstream) return;
+
+      // 动态按需加载依赖
+      try {
+        if (!__HttpProxyAgentClass) {
+          const mod = require('http-proxy-agent');
+          __HttpProxyAgentClass = (mod && (mod.HttpProxyAgent || mod.default)) || mod;
+        }
+      } catch {}
+      try {
+        if (!__HttpsProxyAgentClass) {
+          const mod = require('https-proxy-agent');
+          __HttpsProxyAgentClass = (mod && (mod.HttpsProxyAgent || mod.default)) || mod;
+        }
+      } catch {}
+      try {
+        if (!__SocksProxyAgentClass) {
+          const mod = require('socks-proxy-agent');
+          __SocksProxyAgentClass = (mod && (mod.SocksProxyAgent || mod.default)) || mod;
+        }
+      } catch {}
+      if (!__HttpProxyAgentClass || !__HttpsProxyAgentClass) {
+        try { if (!this.isQuiet) console.warn('[CAPTURE][UPSTREAM] agent modules not found'); } catch {}
+        return;
+      }
+
+      let httpUrl = null, httpsUrl = null, bypassRaw = '';
+      if (upstream === 'system' || upstream === true) {
+        // 优先使用备份里 original（启用我们前的系统代理），兜底当前注册表
+        let orig = null;
+        try { const backup = await this._loadProxyBackup(); orig = backup && backup.original; } catch {}
+        const st = await this.querySystemProxy();
+        const server = (orig && orig.server) || (st && st.server) || '';
+        const override = (orig && orig.override) || (st && st.override) || '';
+        const parsed = this._parseWinProxyServer(server);
+        httpUrl = parsed.http; httpsUrl = parsed.https; bypassRaw = override || '';
+        if (parsed.socks && String(parsed.socks).trim()) {
+          const socksAddr = String(parsed.socks).trim();
+          httpUrl = `socks5://${socksAddr}`;
+          httpsUrl = `socks5://${socksAddr}`;
+        } else {
+          const pick = (u) => {
+            if (!u) return null;
+            if (/^(https?|socks)/i.test(u)) return u;
+            try {
+              const m = String(u).match(/:(\d+)$/);
+              const port = m ? parseInt(m[1], 10) : 0;
+              if (port === 1080 || port === 10808 || port === 1086) return `socks5://${u}`;
+            } catch {}
+            return u;
+          };
+          httpUrl = pick(httpUrl);
+          httpsUrl = pick(httpsUrl) || httpUrl;
+        }
+      } else if (typeof upstream === 'object') {
+        const u = upstream || {};
+        httpUrl = u.http || u.https || u.url || null;
+        httpsUrl = u.https || u.http || u.url || null;
+        bypassRaw = u.bypass || '';
+      } else if (typeof upstream === 'string') {
+        const s = String(upstream || '').trim();
+        if (s.toLowerCase() === 'system') {
+          return await this._prepareUpstream('system');
+        } else {
+          httpUrl = s; httpsUrl = s;
+        }
+      }
+
+      const norm = (u) => {
+        if (!u) return null;
+        const str = String(u).trim();
+        if (/^socks/i.test(str)) return str; // 支持 socks://, socks5://
+        return /^https?:\/\//i.test(str) ? str : ('http://' + str);
+      };
+      httpUrl = norm(httpUrl);
+      httpsUrl = norm(httpsUrl) || httpUrl;
+
+      // 自连保护：如果上游地址就是我们自己，忽略
+      const isSelf = (u) => {
+        try { return u && this._ourServer && u.replace(/^https?:\/\//i,'') === this._ourServer; } catch { return false; }
+      };
+      if (isSelf(httpUrl)) httpUrl = null;
+      if (isSelf(httpsUrl)) httpsUrl = null;
+
+      // 根据协议分别创建 Agent
+      const makeAgent = (url) => {
+        if (!url) return null;
+        if (/^socks/i.test(url)) return __SocksProxyAgentClass ? new __SocksProxyAgentClass(url) : null;
+        if (/^https:/i.test(url)) return new __HttpsProxyAgentClass(url);
+        return new __HttpProxyAgentClass(url);
+      };
+      // 启动前做一次 reachability 探测，不可达则禁用上游
+      const okHttp = await this._probeUpstreamReachable(httpUrl);
+      const okHttps = await this._probeUpstreamReachable(httpsUrl);
+      if (!okHttp && !okHttps) {
+        this._httpUpstreamAgent = null;
+        this._httpsUpstreamAgent = null;
+        this._upstreamHttpUrl = null;
+        this._upstreamHttpsUrl = null;
+        if (!this.isQuiet) console.warn('[CAPTURE][UPSTREAM][skip] upstream not reachable, use DIRECT');
+      } else {
+        this._httpUpstreamAgent = okHttp ? makeAgent(httpUrl) : null;
+        this._httpsUpstreamAgent = okHttps ? makeAgent(httpsUrl) : (okHttp ? makeAgent(httpUrl) : null);
+      }
+      this._upstreamHttpUrl = httpUrl;
+      this._upstreamHttpsUrl = httpsUrl;
+      this._upstreamBypass = this._parseBypassList(bypassRaw);
+
+      try { if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM] http=%s https=%s bypass=%j', httpUrl, httpsUrl, this._upstreamBypass); } catch {}
+    } catch (e) {
+      try { if (!this.isQuiet) console.warn('[CAPTURE][UPSTREAM][prepare][err]', e && e.message); } catch {}
+    }
+  }
+
+  async _probeUpstreamReachable(url) {
+    try {
+      if (!url) return false;
+      const u = new URL(/^socks/i.test(url) ? url.replace(/^socks5?/i, 'http') : url);
+      const host = u.hostname;
+      const port = u.port ? Number(u.port) : (/^https:/i.test(url) ? 443 : 80);
+      if (!host || !port) return false;
+      return await new Promise((resolve) => {
+        try {
+          const socket = net.connect({ host, port, timeout: 800 }, () => { try { socket.destroy(); } catch {}; resolve(true); });
+          socket.on('error', () => { try { socket.destroy(); } catch {}; resolve(false); });
+          socket.on('timeout', () => { try { socket.destroy(); } catch {}; resolve(false); });
+        } catch { resolve(false); }
+      });
+    } catch { return false; }
+  }
+
+  _parseWinProxyServer(s) {
+    const out = { http: null, https: null, socks: null };
+    try {
+      const raw = String(s || '').trim();
+      if (!raw) return out;
+      if (raw.includes('=')) {
+        raw.split(';').forEach(p => {
+          const seg = String(p || '').trim();
+          if (!seg) return;
+          const i = seg.indexOf('=');
+          if (i <= 0) return;
+          const k = seg.slice(0, i).toLowerCase();
+          const v = seg.slice(i + 1).trim();
+          if (k === 'http') out.http = v; else if (k === 'https') out.https = v; else if (k === 'socks') out.socks = v;
+        });
+      } else {
+        out.http = raw; out.https = raw;
+      }
+    } catch {}
+    return out;
+  }
+
+  _parseBypassList(s) {
+    try {
+      const items = String(s || '').split(';').map(x => x.trim()).filter(Boolean);
+      const set = new Set(items.concat(['localhost','127.0.0.1','::1','<local>']));
+      return Array.from(set);
+    } catch { return ['localhost','127.0.0.1','::1','<local>']; }
+  }
+
+  _isBypassedHost(host) {
+    try {
+      const h = String(host || '').toLowerCase();
+      if (!h) return true;
+      if (!this._upstreamBypass || !this._upstreamBypass.length) return false;
+      for (const patRaw of this._upstreamBypass) {
+        const pat = String(patRaw || '').toLowerCase();
+        if (pat === '<local>') { if (!h.includes('.')) return true; continue; }
+        if (pat.startsWith('*.')) {
+          const bare = pat.slice(2);
+          if (h === bare || h.endsWith('.' + bare)) return true;
+          continue;
+        }
+        if (h === pat || h.endsWith('.' + pat)) return true;
+      }
+      return false;
+    } catch { return false; }
   }
 }
 

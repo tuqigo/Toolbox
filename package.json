@@ -35,6 +35,9 @@
     "better-sqlite3": "^9.4.0",
     "fs-extra": "^11.0.0",
     "http-mitm-proxy": "^1.1.0",
+    "http-proxy-agent": "^7.0.2",
+    "https-proxy-agent": "^7.0.3",
+    "socks-proxy-agent": "^8.0.2",
     "yauzl": "^2.10.0"
   },
   "build": {
@@ -86,6 +89,9 @@
       "node_modules/file-uri-to-path/**/*",
       "node_modules/http-mitm-proxy/package.json",
       "node_modules/http-mitm-proxy/dist/**/*",
+      "node_modules/http-proxy-agent/**/*",
+      "node_modules/https-proxy-agent/**/*",
+      "node_modules/socks-proxy-agent/**/*",
       "node_modules/async/**/*",
       "node_modules/ws/**/*",
       "node_modules/semaphore/**/*",

@@ -164,7 +164,28 @@
     let rewriteRules = null;
     try { const rr = (el('rewriteRules') && el('rewriteRules').value.trim()) || ''; if (rr) rewriteRules = JSON.parse(rr); } catch {}
     const maxBodyDirMB = Number(el('maxBodyDirMB') && el('maxBodyDirMB').value) || 512;
-    const startRet = await window.MT.invoke('capture.start', { host: '127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null, filters, delayRules, rewriteRules, maxBodyDirMB });
+    // 链式代理：默认开启，默认 system；关闭时不传 upstream 以保持现有逻辑一致
+    let upstreamParam = undefined;
+    try {
+      const enableUp = el('enableUpstream') ? !!el('enableUpstream').checked : true; // 默认启用
+      if (enableUp) {
+        const addrRaw = (el('upstreamAddr') && el('upstreamAddr').value || '').trim();
+        const addr = addrRaw || 'system';
+        if (addr.toLowerCase() === 'system') {
+          upstreamParam = 'system';
+        } else {
+          // 允许直接填 host:port 或带协议的 URL (http/https/socks/socks5)
+          const norm = (s) => (/^(https?|socks|socks5):\/\//i.test(s) ? s : ('http://' + s));
+          let url = norm(addr);
+          // 容错：若出现 http://socks5://... 则去掉前面的 http://
+          if (/^https?:\/\/socks/i.test(url)) url = url.replace(/^https?:\/\//i, '');
+          upstreamParam = { http: url, https: url };
+        }
+      }
+    } catch {}
+    const payload = { host: '127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null, filters, delayRules, rewriteRules, maxBodyDirMB };
+    if (upstreamParam) payload.upstream = upstreamParam;
+    const startRet = await window.MT.invoke('capture.start', payload);
     // 自动切换系统代理模式
     const mode = (el('mode') && el('mode').value) || 'global';
     if (mode === 'pac') {
@@ -327,6 +348,16 @@
         toast('设置已应用');
       } catch { toast('应用失败'); }
     });
+    // 联动：开关控制输入框禁用
+    try {
+      const upChk = el('enableUpstream');
+      const upAddr = el('upstreamAddr');
+      if (upChk && upAddr) {
+        const sync = () => { upAddr.disabled = !upChk.checked; };
+        upChk.addEventListener('change', sync);
+        sync();
+      }
+    } catch {}
     
     // 点击外部隐藏设置面板
     document.addEventListener('click', (e) => {
@@ -360,7 +391,9 @@
       const rewriteRules = (el('rewriteRules') && el('rewriteRules').value) || '';
       const mode = (el('mode') && el('mode').value) || 'global';
       const maxBodyDirMB = Number(el('maxBodyDirMB') && el('maxBodyDirMB').value) || 512;
-      const settings = { targets, pathPrefixes, rewriteRules, mode, maxBodyDirMB };
+      const enableUpstream = el('enableUpstream') ? !!el('enableUpstream').checked : true;
+      const upstreamAddr = (el('upstreamAddr') && el('upstreamAddr').value) || 'system';
+      const settings = { targets, pathPrefixes, rewriteRules, mode, maxBodyDirMB, enableUpstream, upstreamAddr };
       await window.MT.db.put('http-sniffer.settings', settings);
     } catch (e) { try { console.warn('[HTTP-SNIFFER] saveSettings failed', e && e.message); } catch {} }
   }
@@ -376,6 +409,9 @@
         if (val.rewriteRules != null && el('rewriteRules')) el('rewriteRules').value = String(val.rewriteRules || '');
         if (val.mode != null && el('mode')) el('mode').value = String(val.mode || 'global');
         if (val.maxBodyDirMB != null && el('maxBodyDirMB')) el('maxBodyDirMB').value = String(val.maxBodyDirMB || '512');
+        if (el('enableUpstream')) el('enableUpstream').checked = (val.enableUpstream !== false);
+        if (el('upstreamAddr')) el('upstreamAddr').value = String(val.upstreamAddr || 'system');
+        try { if (el('upstreamAddr')) el('upstreamAddr').disabled = !(el('enableUpstream') ? el('enableUpstream').checked : true); } catch {}
         return true;
       }
       return false;
