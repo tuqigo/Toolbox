@@ -3,6 +3,7 @@ const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
 const zlib = require('zlib');
+const crypto = require('crypto');
 // 延迟加载 http-mitm-proxy，避免冷启动硬依赖
 
 let __CachedProxyClass = null;
@@ -394,9 +395,15 @@ class CaptureProxyService {
     const caPem = path.join(this.caDir, 'certs', 'ca.pem');
     await this._ensureCaGenerated();
     if (process.platform === 'win32') {
-      const args = ['-user', '-addstore', 'Root', caPem];
-      const ok = await this._runCertutil(args);
-      return { ok, path: caPem };
+      // 优先尝试当前用户根存储，其次尝试本机根存储（需要管理员权限）
+      const okUser = await this._runCertutil(['-user', '-addstore', 'Root', caPem]);
+      if (okUser) {
+        try { if (!this.isQuiet) console.log('[CAPTURE][CERT][install] user Root => OK'); } catch {}
+        return { ok: true, scope: 'user', path: caPem };
+      }
+      const okMachine = await this._runCertutil(['-addstore', 'Root', caPem]);
+      try { if (!this.isQuiet) console.log('[CAPTURE][CERT][install]', { okUser, okMachine }); } catch {}
+      return { ok: !!okMachine, scope: okMachine ? 'machine' : 'none', path: caPem };
     }
     // 其他平台暂时仅返回路径，让用户手动安装
     return { ok: true, path: caPem };
@@ -405,14 +412,24 @@ class CaptureProxyService {
   async isCertInstalled() {
     try {
       if (process.platform !== 'win32') return false;
-      // 优先 PowerShell 查询当前用户根存储 CN 包含 NodeMITMProxyCA
-      const ps = "@(Get-ChildItem -Path Cert:\\CurrentUser\\Root | Where-Object { $_.Subject -like '*Node MITM Proxy CA*' -or $_.Subject -like '*NodeMITMProxyCA*' }).Count";
-      const r = await this._spawnCapture('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps]);
-      const n = parseInt(String((r.stdout||'').trim()), 10);
-      if (!isNaN(n)) return n > 0;
-      // 兜底用 certutil 枚举
-      const cu = await this._spawnCapture('certutil', ['-user', '-store', 'Root']);
-      return /Node\s*MITM\s*Proxy\s*CA|NodeMITMProxyCA/i.test(cu.stdout || '');
+      await this._ensureCaGenerated();
+      // 计算 CA 指纹，优先用指纹匹配，兜底用主题名匹配
+      const fp = await this._calcCaThumbprint();
+      const checkByCertutil = async (args) => {
+        const r = await this._spawnCapture('certutil', args);
+        const out = (r && r.stdout) || '';
+        if (fp) {
+          // 归一化输出，只保留十六进制字符
+          const normalized = out.replace(/[^0-9A-F]/gi, '').toUpperCase();
+          if (normalized.includes(fp)) return true;
+        }
+        return /Node\s*MITM\s*Proxy\s*CA|NodeMITMProxyCA/i.test(out);
+      };
+      const userOk = await checkByCertutil(['-user', '-store', 'Root']);
+      const machineOk = userOk ? false : await checkByCertutil(['-store', 'Root']);
+      const ok = !!(userOk || machineOk);
+      try { if (!this.isQuiet) console.log('[CAPTURE][CERT][check]', { userOk, machineOk, fp: fp ? (fp.slice(0, 8) + '...') : null }); } catch {}
+      return ok;
     } catch { return false; }
   }
 
@@ -577,8 +594,10 @@ class CaptureProxyService {
       // certutil -user -delstore "Root" <SerialNumber or SHA1> 无法直接用文件
       // 简化：尝试从根存储删除 CN=NodeMITMProxyCA（可能会有多个副本）
       const name = 'NodeMITMProxyCA';
-      const ok = await this._runCertutil(['-user', '-delstore', 'Root', name]);
-      return { ok };
+      const okUser = await this._runCertutil(['-user', '-delstore', 'Root', name]);
+      const okMachine = await this._runCertutil(['-delstore', 'Root', name]);
+      try { if (!this.isQuiet) console.log('[CAPTURE][CERT][uninstall]', { okUser, okMachine }); } catch {}
+      return { ok: !!(okUser || okMachine) };
     }
     return { ok: true };
   }
@@ -868,6 +887,18 @@ class CaptureProxyService {
         });
       } catch (e) { reject(e); }
     });
+  }
+
+  async _calcCaThumbprint() {
+    try {
+      const caPem = path.join(this.caDir, 'certs', 'ca.pem');
+      if (!(await fs.pathExists(caPem))) return null;
+      const pem = await fs.readFile(caPem, 'utf8');
+      const b64 = pem.replace(/-----BEGIN CERTIFICATE-----/g, '').replace(/-----END CERTIFICATE-----/g, '').replace(/\s+/g, '');
+      const der = Buffer.from(b64, 'base64');
+      const sha1 = crypto.createHash('sha1').update(der).digest('hex').toUpperCase();
+      return sha1;
+    } catch { return null; }
   }
 
   async _runCertutil(args) {

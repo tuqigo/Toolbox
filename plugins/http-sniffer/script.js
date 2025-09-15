@@ -130,8 +130,8 @@
     try{
       const ret = await window.MT.invoke('capture.installCert');
       const ok = (ret && ret.ok) || (ret && ret.data && ret.data.ok);
-      if (ok) alert('证书安装完成。若浏览器仍提示不受信，请在“受信任的根证书颁发机构(当前用户)”检查。');
-      else alert('证书安装失败，请手动安装。');
+      if (ok) toast('证书安装完成。若浏览器仍提示不受信，请在“受信任的根证书颁发机构(当前用户)”检查。');
+      else toast('证书安装失败，请手动安装。');
     }catch(e){ alert('证书安装失败: '+(e && e.message)); }
   }
 
