@@ -17,14 +17,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
+      - name: Setup Node.js (with cache)
+        if: ${{ hashFiles('**/package-lock.json') != '' }}
         uses: actions/setup-node@v4
         with:
           node-version: 18
           cache: npm
+          cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
+      - name: Setup Node.js (no cache)
+        if: ${{ hashFiles('**/package-lock.json') == '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install dependencies (npm ci)
+        if: ${{ hashFiles('**/package-lock.json') != '' }}
         run: npm ci
+
+      - name: Install dependencies (npm install fallback)
+        if: ${{ hashFiles('**/package-lock.json') == '' }}
+        run: npm install
 
       - name: Build Windows artifacts (no publish)
         env:
