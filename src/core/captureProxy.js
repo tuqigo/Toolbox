@@ -115,11 +115,12 @@ class CaptureProxyService {
     // 核心钩子：请求/响应
     this.proxy.onError((ctx, err, kind) => {
       try { if (!this.isQuiet) console.error('[CAPTURE][onError]', kind, err && err.message); } catch {}
-      // 若上游错误，触发短暂熔断，避免持续不可达导致页面不通
+      // 若上游错误，触发短暂熔断，避免持续不可达导致页面不通（仅当本次请求实际使用了上游时）
       try {
         const msg = (err && err.message) || '';
         const transient = /ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|socket hang up/i.test(msg);
-        if (kind && String(kind).includes('PROXY_TO_SERVER_REQUEST_ERROR') && transient) {
+        const usedUpstream = !!(ctx && ctx.__mtUsedUpstream);
+        if (usedUpstream && kind && String(kind).includes('PROXY_TO_SERVER_REQUEST_ERROR') && transient) {
           this._upstreamDisabledUntil = Date.now() + 15000; // 15s 熔断
           if (!this.isQuiet) console.warn('[CAPTURE][UPSTREAM][disabled]', 'for 15s due to', msg);
         }
@@ -1541,6 +1542,15 @@ class CaptureProxyService {
     lines.push('function FindProxyForURL(url, host) {');
     const conds = [];
     const proxyExpr = `\"PROXY ${server}\"`;
+    // 本地与内网直连（基础绕过）
+    lines.push('  if (isPlainHostName(host) || host == "localhost") return "DIRECT";');
+    lines.push('  var resolved = dnsResolve(host);');
+    lines.push('  if (resolved) {');
+    lines.push('    if (shExpMatch(resolved, "127.*")) return "DIRECT";');
+    lines.push('    if (isInNet(resolved, "10.0.0.0", "255.0.0.0")) return "DIRECT";');
+    lines.push('    if (isInNet(resolved, "172.16.0.0", "255.240.0.0")) return "DIRECT";');
+    lines.push('    if (isInNet(resolved, "192.168.0.0", "255.255.0.0")) return "DIRECT";');
+    lines.push('  }');
     // 优先按域名匹配（若配置了目标域）
     try {
       const set = this._normalizeTargetHosts(targets);
@@ -1549,10 +1559,8 @@ class CaptureProxyService {
           if (!t) continue;
           if (String(t).startsWith('*.')) {
             const bare = String(t).slice(2);
-            // 子域匹配或等于裸域
             conds.push(`dnsDomainIs(host, \"${bare}\") || shExpMatch(host, \"*.${bare}\")`);
           } else {
-            // 精确匹配主域或子域后缀
             conds.push(`dnsDomainIs(host, \"${t}\") || shExpMatch(host, \"*.${t}\") || host == \"${t}\"`);
           }
         }
@@ -1570,6 +1578,7 @@ class CaptureProxyService {
     if (conds.length) {
       lines.push(`  if (${conds.join(' || ')}) return ${proxyExpr};`);
     }
+    // 恢复：未命中条件时默认为 DIRECT，由用户通过 targets/pathPrefixes 控制劫持范围
     lines.push('  return "DIRECT";');
     lines.push('}');
     return lines.join('\n');
@@ -1634,7 +1643,8 @@ class CaptureProxyService {
         try { const backup = await this._loadProxyBackup(); orig = backup && backup.original; } catch {}
         const st = await this.querySystemProxy();
         const server = (orig && orig.server) || (st && st.server) || '';
-        const override = (orig && orig.override) || (st && st.override) || '';
+        // 强制链式：不继承系统 ProxyOverride，避免在家庭网络下被大范围绕过
+        const override = '';
         const parsed = this._parseWinProxyServer(server);
         httpUrl = parsed.http; httpsUrl = parsed.https; bypassRaw = override || '';
         if (parsed.socks && String(parsed.socks).trim()) {
