@@ -242,7 +242,7 @@
   }
 
   async function loop(){
-    await updateStatus();
+    // await updateStatus();
     await refreshList();
     timer = setTimeout(loop, 1500);
   }
