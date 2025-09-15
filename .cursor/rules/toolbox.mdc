@@ -67,3 +67,8 @@ alwaysApply: true
 - 新增能力时，遵循：入口在 `src/main.js` 注册 → 放入对应 `src/core/*` 模块 → 暴露到 `window.MT`。
 - 插件问题优先参考 `docs/PLUGIN_DEVELOPMENT.md` 与内置 `plugins/*` 实例。
 - 若需外部能力，建议通过 `mt.secure-call` 扩展通道，不在插件中直调 Node API。
+
+
+## 主题策略 
+- 有页面的插件要做暗黑和明两种主题适配  window.MT.invoke('ui.getTheme') 可以拿到当前主题 
+- 要求你画图的时候使用mermaid语法

@@ -2,6 +2,8 @@ const fs = require('fs-extra');
 const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
+const http = require('http');
+const net = require('net');
 const zlib = require('zlib');
 const crypto = require('crypto');
 // 延迟加载 http-mitm-proxy，避免冷启动硬依赖
@@ -48,6 +50,21 @@ class CaptureProxyService {
 
     // 系统代理备份文件
     this.proxyBackupFile = path.join(this.captureDir, 'proxy-backup.json');
+
+    // PAC 文件路径
+    this.pacFile = path.join(this.captureDir, 'proxy.pac');
+
+    // PAC 本地服务（为避免 file:/// 兼容性问题，优先走 http 本地服务）
+    this._pacHttpServer = null;
+    this._pacHttpPort = 0;
+    this._pacContent = '';
+
+    // 目录配额（MB）与配额检查节流
+    this.maxBodyDirMB = Number(options.maxBodyDirMB || 512);
+    this._lastQuotaCheckTs = 0;
+
+    // 改写/断点规则
+    this.rewriteRules = null;
   }
 
   async ensureDirs() {
@@ -63,13 +80,15 @@ class CaptureProxyService {
       return { ok: true, port: this.port };
     }
 
-    const port = Number(opts.port || 8888);
+    let port = Number(opts.port || 8888);
     const host = String(opts.host || '127.0.0.1');
     this.maxEntries = Math.max(100, Number(opts.maxEntries || 2000));
     this.keepBodies = opts.recordBody !== false;
     this.targetHosts = this._normalizeTargetHosts(opts.targets); // string|array|null
     this.filters = this._normalizeFilters(opts.filters || null);
     this.delayRules = this._normalizeDelayRules(opts.delayRules || null);
+    this.maxBodyDirMB = Math.max(64, Number(opts.maxBodyDirMB || this.maxBodyDirMB || 512));
+    this.rewriteRules = this._normalizeRewriteRules(opts.rewriteRules || null);
 
     if (!this.__ProxyClass) this.__ProxyClass = await __loadProxyClass(this.isQuiet);
     // 仅在非开发环境抑制 http-mitm-proxy 的噪声日志
@@ -86,6 +105,58 @@ class CaptureProxyService {
     const shouldCapture = (ctx) => this._shouldCaptureCtx(ctx);
 
     this.proxy.onRequest((ctx, next) => {
+      // 改写/阻断/Mock：优先处理
+      try {
+        const rule = this._matchRewrite(ctx);
+        if (rule) ctx.__mtRewrite = rule; else ctx.__mtRewrite = null;
+        if (rule && (rule.action === 'block' || rule.action === 'mock')) {
+          try {
+            const now = Date.now();
+            const id = ++this.idCounter;
+            ctx.__mtId = id;
+            ctx.__mtStart = now;
+            const { method, url } = ctx.clientToProxyRequest;
+            const host = this._getHost(ctx) || '';
+            const scheme = ctx.isSSL ? 'https' : 'http';
+            const item = {
+              id,
+              tsStart: now,
+              tsEnd: now,
+              method: String(method || '').toUpperCase(),
+              scheme,
+              host,
+              path: url || '/',
+              status: (rule.mock && Number(rule.mock.status)) || 403,
+              mime: (rule.mock && rule.mock.headers && (rule.mock.headers['Content-Type'] || rule.mock.headers['content-type'])) || 'text/plain',
+              reqSize: 0,
+              respSize: (rule.mock && rule.mock.bodyText ? Buffer.byteLength(String(rule.mock.bodyText), 'utf8') : 0),
+              duration: 0,
+              reqHeaders: { ...(ctx.clientToProxyRequest.headers || {}) },
+              respHeaders: { ...(rule.mock && rule.mock.headers || {}) },
+              reqBodyPath: null,
+              respBodyPath: null,
+              reqBodyInline: null,
+              respBodyInline: (rule.mock && rule.mock.bodyText != null) ? String(rule.mock.bodyText) : 'Blocked by rule'
+            };
+            this._pushRecord(item);
+          } catch {}
+          try {
+            const status = (rule.mock && Number(rule.mock.status)) || 403;
+            const headers = { 'Content-Type': 'text/plain; charset=utf-8', ...(rule.mock && rule.mock.headers || {}) };
+            const body = (rule.mock && rule.mock.bodyText != null) ? String(rule.mock.bodyText) : 'Blocked by rule';
+            ctx.proxyToClientResponse.writeHead(status, headers);
+            ctx.proxyToClientResponse.end(body);
+          } catch {}
+          return; // 不再透传到上游
+        }
+        // 仅设置请求头改写
+        if (rule && rule.setReqHeaders) {
+          try {
+            ctx.proxyToServerRequestOptions = ctx.proxyToServerRequestOptions || {};
+            ctx.proxyToServerRequestOptions.headers = { ...(ctx.proxyToServerRequestOptions.headers || {}), ...rule.setReqHeaders };
+          } catch {}
+        }
+      } catch {}
       // 无论是否记录，先计算是否需要延迟
       try { if (ctx.__mtDelayMs == null) ctx.__mtDelayMs = this._matchDelay(ctx) || 0; } catch {}
       if (!shouldCapture(ctx)) return next();
@@ -143,6 +214,14 @@ class CaptureProxyService {
           // 记录 mime
           const ct = ctx.__mtRecord.respHeaders['content-type'] || ctx.__mtRecord.respHeaders['Content-Type'];
           if (ct) ctx.__mtRecord.mime = String(ct).split(';')[0].trim();
+          // 响应头改写（若规则存在）
+          try {
+            const rr = ctx.__mtRewrite;
+            if (rr && rr.setRespHeaders && ctx.serverToProxyResponse && ctx.serverToProxyResponse.headers) {
+              Object.assign(ctx.serverToProxyResponse.headers, rr.setRespHeaders);
+              Object.assign(ctx.__mtRecord.respHeaders, rr.setRespHeaders);
+            }
+          } catch {}
         } catch {}
         next();
       };
@@ -179,6 +258,13 @@ class CaptureProxyService {
     });
 
     // 启动监听
+    // 端口占用自动重试（先探测可用端口，再启动）
+    try {
+      const chosen = await this._findAvailablePort(host, port, 30);
+      if (chosen !== port) { try { if (!this.isQuiet) console.log('[CAPTURE] port busy, switch to', chosen); } catch {} }
+      port = chosen;
+    } catch {}
+
     await new Promise((resolve, reject) => {
       try {
         this.proxy.listen({ port, host, sslCaDir: this.caDir }, (err) => {
@@ -229,6 +315,14 @@ class CaptureProxyService {
     try {
       base.certInstalled = await this.isCertInstalled();
     } catch { base.certInstalled = false; }
+    try {
+      base.caPath = path.join(this.caDir, 'certs', 'ca.pem');
+      base.caThumbprint = await this._calcCaThumbprint();
+    } catch {}
+    try {
+      const st = await this.querySystemProxy();
+      base.pacUrl = st && st.autoConfigURL || '';
+    } catch {}
     return base;
   }
 
@@ -329,6 +423,81 @@ class CaptureProxyService {
     };
 
     return JSON.stringify(log, null, 2);
+  }
+
+  // 启用 PAC（Windows）
+  async enablePAC({ host = '127.0.0.1', port = null, targets = null, pathPrefixes = null } = {}) {
+    if (process.platform !== 'win32') return { ok: false, error: 'only supported on windows' };
+    const p = Number(port || this.port || 8888);
+    const server = `${host}:${p}`;
+    const pacPath = this.pacFile;
+    try { await this.ensureDirs(); } catch {}
+    // 备份当前系统代理
+    try {
+      const st = await this.querySystemProxy();
+      const prev = { enable: st.enable, server: st.server, override: st.override, autoConfigURL: st.autoConfigURL, autoDetect: st.autoDetect };
+      await this._saveProxyBackup(prev, { ourServer: server, ourPacUrl: this._fileToFileUrl(pacPath) });
+    } catch {}
+    // 生成 PAC
+    const pac = this._generatePacContent({ server, targets, pathPrefixes });
+    await fs.writeFile(pacPath, pac, 'utf8');
+    this._pacContent = pac;
+    // 尝试使用本地 http 服务提供 PAC，兼容某些应用不支持 file:/// 的情况
+    let pacUrl = this._fileToFileUrl(pacPath);
+    try {
+      if (!this._pacHttpServer) {
+        await new Promise((resolve, reject) => {
+          try {
+            const srv = http.createServer((req, res) => {
+              try {
+                res.writeHead(200, { 'Content-Type': 'application/x-ns-proxy-autoconfig; charset=utf-8' });
+                res.end(this._pacContent || pac);
+              } catch { try { res.end(''); } catch {} }
+            });
+            srv.listen(0, '127.0.0.1', () => {
+              try {
+                const addr = srv.address();
+                this._pacHttpServer = srv;
+                this._pacHttpPort = addr && addr.port || 0;
+                resolve();
+              } catch (e) { reject(e); }
+            });
+          } catch (e) { reject(e); }
+        });
+      }
+      if (this._pacHttpPort) {
+        pacUrl = `http://127.0.0.1:${this._pacHttpPort}/proxy.pac`;
+      }
+    } catch (e) {
+      try { if (!this.isQuiet) console.warn('[CAPTURE][PAC][http-server][fail]', e && e.message); } catch {}
+    }
+    // 注册表切换为 PAC
+    try { if (!this.isQuiet) console.log('[CAPTURE][PAC][enable] setting registry with pacUrl:', pacUrl); } catch {}
+    const ok = await this._setProxyRegistry({ enable: 0, server: '', override: '', autoConfigURL: pacUrl, autoDetect: 0 });
+    try { if (!this.isQuiet) console.log('[CAPTURE][PAC][enable] registry set result:', ok); } catch {}
+    await this._notifyInternetSettingsChanged();
+    const state = await this.querySystemProxy();
+    try { if (!this.isQuiet) console.log('[CAPTURE][PAC][enable] final state:', state); } catch {}
+    return { ok: !!ok, pacUrl, server };
+  }
+
+  async disablePAC() {
+    if (process.platform !== 'win32') return { ok: false, error: 'only supported on windows' };
+    let ok = await this._restoreProxyBackup();
+    // 无论是否恢复成功，确保 AutoConfigURL 清空，避免“使用脚本”遗留为开
+    try {
+      const st = await this.querySystemProxy();
+      if (st && st.autoConfigURL) {
+        const cleared = await this._setProxyRegistry({ autoConfigURL: '' });
+        ok = ok && cleared;
+      }
+    } catch {}
+    // 关闭 PAC 本地服务
+    try { if (this._pacHttpServer) { this._pacHttpServer.close(); this._pacHttpServer = null; this._pacHttpPort = 0; } } catch {}
+    await this._notifyInternetSettingsChanged();
+    const state = await this.querySystemProxy();
+    try { if (!this.isQuiet) console.log('[CAPTURE][PAC][disable][state]', state); } catch {}
+    return { ok, state };
   }
 
   // 启用系统代理（Windows，当前用户范围）
@@ -456,12 +625,17 @@ class CaptureProxyService {
     const qEnable = await this._spawnCapture('reg', ['query', base, '/v', 'ProxyEnable']);
     const qServer = await this._spawnCapture('reg', ['query', base, '/v', 'ProxyServer']);
     const qOverride = await this._spawnCapture('reg', ['query', base, '/v', 'ProxyOverride']);
+    const qAuto = await this._spawnCapture('reg', ['query', base, '/v', 'AutoConfigURL']);
+    const qAutoDetect = await this._spawnCapture('reg', ['query', base, '/v', 'AutoDetect']);
     const enable = /REG_DWORD\s+0x1/i.test(qEnable.stdout || '') ? 1 : 0;
     const serverMatch = (qServer.stdout || '').match(/ProxyServer\s+REG_SZ\s+(.+)$/mi);
     const server = serverMatch ? serverMatch[1].trim() : '';
     const overrideMatch = (qOverride.stdout || '').match(/ProxyOverride\s+REG_SZ\s+(.+)$/mi);
     const override = overrideMatch ? overrideMatch[1].trim() : '';
-    return { supported: true, enable, server, override, raw: { enable: qEnable, server: qServer, override: qOverride } };
+    const autoMatch = (qAuto.stdout || '').match(/AutoConfigURL\s+REG_SZ\s+(.+)$/mi);
+    const autoConfigURL = autoMatch ? autoMatch[1].trim() : '';
+    const autoDetect = /REG_DWORD\s+0x1/i.test(qAutoDetect.stdout || '') ? 1 : 0;
+    return { supported: true, enable, server, override, autoConfigURL, autoDetect, raw: { enable: qEnable, server: qServer, override: qOverride, auto: qAuto, autoDetect: qAutoDetect } };
   }
 
   async _spawnCapture(command, args) {
@@ -526,14 +700,14 @@ class CaptureProxyService {
     } catch {}
   }
 
-  async _saveProxyBackup(originalState, { ourServer } = {}) {
+  async _saveProxyBackup(originalState, { ourServer, ourPacUrl } = {}) {
     try {
       const exists = await fs.pathExists(this.proxyBackupFile);
       let data = exists ? await fs.readJson(this.proxyBackupFile) : null;
       if (!data || !data.original) {
-        data = { original: { enable: originalState && originalState.enable, server: originalState && originalState.server, override: originalState && originalState.override }, last: null };
+        data = { original: { enable: originalState && originalState.enable, server: originalState && originalState.server, override: originalState && originalState.override, autoConfigURL: originalState && originalState.autoConfigURL, autoDetect: originalState && originalState.autoDetect }, last: null };
       }
-      data.last = { setBy: 'MiniToolbox', ourServer: String(ourServer || ''), at: Date.now() };
+      data.last = { setBy: 'MiniToolbox', ourServer: String(ourServer || ''), ourPacUrl: String(ourPacUrl || ''), at: Date.now() };
       await fs.writeJson(this.proxyBackupFile, data, { spaces: 2 });
       try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][backup][save]', data); } catch {}
     } catch {}
@@ -549,13 +723,13 @@ class CaptureProxyService {
       const data = await this._loadProxyBackup();
       if (!data || !data.original) return false;
       const orig = data.original;
-      const ok = await this._setProxyRegistry({ enable: orig.enable, server: orig.server, override: orig.override });
+      const ok = await this._setProxyRegistry({ enable: orig.enable, server: orig.server, override: orig.override, autoConfigURL: orig.autoConfigURL, autoDetect: orig.autoDetect });
       await this._notifyInternetSettingsChanged();
       return ok;
     } catch { return false; }
   }
 
-  async _setProxyRegistry({ enable, server, override }) {
+  async _setProxyRegistry({ enable, server, override, autoConfigURL, autoDetect }) {
     try {
       const base = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
       const regExe = this._getRegExePath();
@@ -563,6 +737,8 @@ class CaptureProxyService {
       if (enable != null) steps.push(['add', base, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', String(Number(!!enable)), '/f']);
       if (server != null) steps.push(['add', base, '/v', 'ProxyServer', '/t', 'REG_SZ', '/d', String(server), '/f']);
       if (override != null) steps.push(['add', base, '/v', 'ProxyOverride', '/t', 'REG_SZ', '/d', String(override), '/f']);
+      if (autoConfigURL != null) steps.push(['add', base, '/v', 'AutoConfigURL', '/t', 'REG_SZ', '/d', String(autoConfigURL), '/f']);
+      if (autoDetect != null) steps.push(['add', base, '/v', 'AutoDetect', '/t', 'REG_DWORD', '/d', String(Number(!!autoDetect)), '/f']);
       for (const args of steps) {
         const r = await this._spawnCapture(regExe, args);
         if (!(r && r.code === 0)) return false;
@@ -649,6 +825,8 @@ class CaptureProxyService {
       rec.respBodyInline = resp.inline;
       rec.respBodyPath = resp.file;
     } catch {}
+    // 目录配额控制（节流执行）
+    try { await this._enforceBodiesQuota(); } catch {}
   }
 
   _pushRecord(item) {
@@ -783,6 +961,68 @@ class CaptureProxyService {
       }
       return 0;
     } catch { return 0; }
+  }
+
+  // -------- 改写/断点 --------
+  _normalizeRewriteRules(rules) {
+    if (!rules) return null;
+    let arr = Array.isArray(rules) ? rules : null;
+    if (!arr) {
+      try { arr = JSON.parse(String(rules)); } catch { arr = null; }
+    }
+    if (!Array.isArray(arr) || !arr.length) return null;
+    const out = [];
+    for (const r of arr) {
+      if (!r || !r.action) continue;
+      const action = String(r.action).toLowerCase();
+      if (!['block','mock','setheaders'].includes(action)) continue;
+      const match = r.match || {};
+      const method = match.method ? String(match.method).toUpperCase() : null;
+      const pathPrefix = match.pathPrefix ? String(match.pathPrefix) : null;
+      const hostIncludes = match.hostIncludes ? String(match.hostIncludes) : null;
+      const headerEquals = match.headerEquals && typeof match.headerEquals === 'object' ? match.headerEquals : null;
+      const rule = { action, method, pathPrefix, hostIncludes, headerEquals };
+      if (action === 'mock') {
+        rule.mock = {
+          status: (r.mock && r.mock.status) || 200,
+          headers: (r.mock && r.mock.headers) || { 'Content-Type': 'application/json; charset=utf-8' },
+          bodyText: (r.mock && r.mock.bodyText != null) ? String(r.mock.bodyText) : ''
+        };
+      }
+      if (r.setReqHeaders && typeof r.setReqHeaders === 'object') rule.setReqHeaders = r.setReqHeaders;
+      if (r.setRespHeaders && typeof r.setRespHeaders === 'object') rule.setRespHeaders = r.setRespHeaders;
+      out.push(rule);
+    }
+    return out.length ? out : null;
+  }
+
+  _matchRewrite(ctx) {
+    try {
+      if (!this.rewriteRules || !this.rewriteRules.length) return null;
+      const req = ctx && ctx.clientToProxyRequest || {};
+      const method = String(req.method || '').toUpperCase();
+      const host = this._getHost(ctx) || '';
+      const urlRaw = req.url || '/';
+      let path = '/';
+      try { path = new URL(urlRaw, (ctx.isSSL ? 'https://' : 'http://') + host).pathname + (new URL(urlRaw, 'http://x').search || ''); } catch { path = urlRaw; }
+      for (const r of this.rewriteRules) {
+        if (r.method && r.method !== method) continue;
+        if (r.hostIncludes && !host.includes(r.hostIncludes)) continue;
+        if (r.pathPrefix && !path.startsWith(r.pathPrefix)) continue;
+        if (r.headerEquals) {
+          const hdrs = req.headers || {};
+          let allOk = true;
+          for (const k of Object.keys(r.headerEquals)) {
+            const v = r.headerEquals[k];
+            const hv = hdrs[k] || hdrs[k.toLowerCase()] || hdrs[k.toUpperCase()];
+            if (String(hv) !== String(v)) { allOk = false; break; }
+          }
+          if (!allOk) continue;
+        }
+        return r;
+      }
+      return null;
+    } catch { return null; }
   }
 
   _silenceMitmDebug() {
@@ -1178,6 +1418,111 @@ class CaptureProxyService {
     };
     try { if (!this.isQuiet) console.log('[CAPTURE][REPLAY][done]', { status: result.data.status, duration: result.data.duration, url: result.data.url }); } catch {}
     return result;
+  }
+
+  // ---------- 辅助：端口探测与目录配额 ----------
+  async _findAvailablePort(host, startPort, maxSteps = 20) {
+    const tryOne = (p) => new Promise((resolve, reject) => {
+      const srv = net.createServer();
+      srv.once('error', (err) => { try { srv.close(); } catch {} resolve(null); });
+      srv.once('listening', () => { const pp = srv.address() && srv.address().port; srv.close(() => resolve(pp || p)); });
+      try { srv.listen(p, host); } catch (e) { resolve(null); }
+    });
+    let p = Number(startPort);
+    for (let i = 0; i <= maxSteps; i++) {
+      const got = await tryOne(p);
+      if (got != null) return p; // p 可用
+      p += 1;
+    }
+    return startPort; // 兜底返回原端口
+  }
+
+  async _enforceBodiesQuota() {
+    try {
+      const now = Date.now();
+      if (now - (this._lastQuotaCheckTs || 0) < 5000) return; // 5s 节流
+      this._lastQuotaCheckTs = now;
+      const dir = path.join(this.captureDir, 'bodies');
+      const files = await fs.readdir(dir);
+      let total = 0;
+      const stats = [];
+      for (const f of files) {
+        const fp = path.join(dir, f);
+        try {
+          const st = await fs.stat(fp);
+          if (!st.isFile()) continue;
+          total += st.size;
+          stats.push({ path: fp, mtime: st.mtimeMs, size: st.size });
+        } catch {}
+      }
+      const quotaBytes = Math.max(64, this.maxBodyDirMB || 512) * 1024 * 1024;
+      if (total <= quotaBytes) return;
+      stats.sort((a, b) => a.mtime - b.mtime); // 旧的在前
+      let removed = 0;
+      for (const s of stats) {
+        if (total <= quotaBytes * 0.9) break; // 回落至 90%
+        try { await fs.remove(s.path); total -= s.size; removed += 1; } catch {}
+      }
+      try { if (!this.isQuiet) console.log('[CAPTURE][GC]', { beforeMB: (total/1024/1024).toFixed(1), quotaMB: this.maxBodyDirMB, removed }); } catch {}
+    } catch {}
+  }
+
+  _generatePacContent({ server, targets, pathPrefixes }) {
+    const lines = [];
+    lines.push('function FindProxyForURL(url, host) {');
+    const conds = [];
+    const proxyExpr = `\"PROXY ${server}\"`;
+    // 优先按域名匹配（若配置了目标域）
+    try {
+      const set = this._normalizeTargetHosts(targets);
+      if (set && set.size) {
+        for (const t of set) {
+          if (!t) continue;
+          if (String(t).startsWith('*.')) {
+            const bare = String(t).slice(2);
+            // 子域匹配或等于裸域
+            conds.push(`dnsDomainIs(host, \"${bare}\") || shExpMatch(host, \"*.${bare}\")`);
+          } else {
+            // 精确匹配主域或子域后缀
+            conds.push(`dnsDomainIs(host, \"${t}\") || shExpMatch(host, \"*.${t}\") || host == \"${t}\"`);
+          }
+        }
+      }
+    } catch {}
+    // 再按路径匹配（可选）
+    try {
+      const f = this._normalizeFilters({ pathPrefixes });
+      if (f && f.pathPrefixes && f.pathPrefixes.length) {
+        for (const p of f.pathPrefixes) {
+          conds.push(`shExpMatch(url, \"*${p}*\")`);
+        }
+      }
+    } catch {}
+    if (conds.length) {
+      lines.push(`  if (${conds.join(' || ')}) return ${proxyExpr};`);
+    }
+    lines.push('  return "DIRECT";');
+    lines.push('}');
+    return lines.join('\n');
+  }
+
+  _fileToFileUrl(p) {
+    try {
+      let fp = path.resolve(p);
+      let url = 'file:///' + fp.replace(/\\/g, '/');
+      return url;
+    } catch { return ''; }
+  }
+
+  // 预览PAC内容（不实际启用）
+  previewPAC({ host = '127.0.0.1', port = 8888, targets = null, pathPrefixes = null } = {}) {
+    try {
+      const server = `${host}:${port}`;
+      const pac = this._generatePacContent({ server, targets, pathPrefixes });
+      return { ok: true, pac, server };
+    } catch (e) {
+      return { ok: false, error: e && e.message || String(e) };
+    }
   }
 }
 

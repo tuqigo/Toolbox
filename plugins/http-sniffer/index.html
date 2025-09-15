@@ -18,41 +18,77 @@
       --warn: #ffb86c;
       --bad: #ff6b6b;
     }
+    :root[data-theme="light"] {
+      --bg: #ffffff;
+      --panel: #f8f9fa;
+      --panel-2: #e9ecef;
+      --fg: #212529;
+      --muted: #6c757d;
+      --border: #dee2e6;
+      --primary: #0d6efd;
+      --ok: #198754;
+      --warn: #fd7e14;
+      --bad: #dc3545;
+    }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial, PingFang SC, Microsoft Yahei, sans-serif; background: var(--bg); color: var(--fg); }
-    .appbar { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: linear-gradient(180deg, #121622, #0f131c); position: sticky; top: 0; z-index: 2; }
-    .toast { position: fixed; right: 16px; bottom: 16px; background: #111927; border: 1px solid var(--border); color: var(--fg); padding: 10px 12px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.35); display: none; z-index: 9; }
+    .appbar { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel-2); position: sticky; top: 0; z-index: 2; }
+    .toast { position: fixed; right: 16px; bottom: 16px; background: var(--panel); border: 1px solid var(--border); color: var(--fg); padding: 10px 12px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.35); display: none; z-index: 9; }
     .toast.show { display: block; animation: fade .2s ease; }
     @keyframes fade { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: translateY(0);} }
     ::-webkit-scrollbar { width: 10px; height: 10px; }
-    ::-webkit-scrollbar-thumb { background: #273041; border-radius: 6px; border: 2px solid #0f141d; }
-    ::-webkit-scrollbar-track { background: #0b0f16; }
+    ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 6px; border: 2px solid var(--bg); }
+    ::-webkit-scrollbar-track { background: var(--panel-2); }
     .appbar .title { font-weight: 600; letter-spacing: 0.2px; }
     .pill { padding: 4px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); }
     .pill.ok { background: rgba(60,200,107,0.12); color: var(--ok); border-color: rgba(60,200,107,0.28); }
     .pill.bad { background: rgba(255,107,107,0.12); color: var(--bad); border-color: rgba(255,107,107,0.28); }
     .spacer { flex: 1; }
     .btn { height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--fg); cursor: pointer; transition: .15s ease; display: inline-flex; align-items: center; gap: 6px; }
-    .btn:hover { border-color: #2f3647; background: #1a2130; }
-    .btn.primary { background: #1a3b7a; border-color: #214992; color: #cfe0ff; }
-    .btn.primary:hover { background: #1d448e; }
+    .btn:hover { border-color: var(--primary); background: var(--panel-2); }
+    .btn.primary { background: var(--primary); border-color: var(--primary); color: white; }
+    .btn.primary:hover { opacity: 0.9; }
     .toolbar { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
     .group { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--border); padding: 8px; border-radius: 10px; }
     .group label { font-size: 12px; color: var(--muted); }
-    .input, .select { height: 30px; border-radius: 8px; border: 1px solid var(--border); background: #0e121a; color: var(--fg); padding: 0 10px; }
-    .input::placeholder { color: #5c6779; }
+    .input, .select { height: 30px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); padding: 0 10px; outline: none; }
+    .input::placeholder { color: var(--muted); }
+    .input:focus, .select:focus { border-color: var(--primary); }
     .main { display: grid; grid-template-columns: 1.1fr 0.9fr; height: calc(100vh - 120px); }
     .list { overflow: auto; border-right: 1px solid var(--border); background: var(--panel); }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     thead th { position: sticky; top: 0; background: var(--panel-2); border-bottom: 1px solid var(--border); text-align: left; padding: 10px 10px; font-weight: 600; color: var(--muted); }
-    tbody td { padding: 9px 10px; border-bottom: 1px solid #1e2432; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
-    tbody tr:hover { background: #151b28; }
+    tbody td { padding: 9px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+    tbody tr:hover { background: var(--panel-2); }
     .status-err { color: var(--bad); }
     .status-ok { color: var(--ok); }
     .detail { overflow: auto; padding: 12px; background: var(--panel); }
     .note { color: var(--warn); margin-bottom: 8px; }
-    .kv { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; background: #0f141d; border: 1px solid var(--border); padding: 10px; border-radius: 8px; }
+    .kv { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; background: var(--panel-2); border: 1px solid var(--border); padding: 10px; border-radius: 8px; }
   </style>
+  <script>
+    window.MTAPI = window.MT;
+  </script>
+  <script>
+    (async function(){
+      function applyTheme(effective){
+        const root = document.documentElement;
+        if (effective === 'dark'){
+          root.setAttribute('data-theme', '');
+        } else {
+          root.setAttribute('data-theme', 'light');
+        }
+      }
+      try {
+        const themeInfo = await window.MT.invoke('ui.getTheme');
+        const eff = (themeInfo && themeInfo.effective) || 'light';
+        applyTheme(eff);
+      } catch {}
+      window.addEventListener('mt-theme-change', (ev)=>{
+        try { applyTheme((ev && ev.detail && ev.detail.effective) || 'light'); } catch {}
+      });
+    })();
+  </script>
 </head>
 <body>
   <div class="appbar">
@@ -60,24 +96,14 @@
     <div id="pillRunning" class="pill">未运行</div>
     <div id="pillCert" class="pill">证书未安装</div>
     <div class="spacer"></div>
-    <div class="group">
-      <label>端口</label>
-      <input id="port" type="number" value="8888" class="input" style="width:100px"/>
-      <label>目标域</label>
-      <input id="targets" type="text" class="input" placeholder="example.com,*.foo.com" style="width:240px"/>
-      <label>路径前缀</label>
-      <input id="capPrefix" type="text" class="input" placeholder="/api,/v1" style="width:200px"/>
-      <label>延迟规则</label>
-      <input id="capDelays" type="text" class="input" placeholder="POST:/api/foo=5000;/bar=2000" style="width:240px"/>
-      <button id="btnApplyTargets" class="btn" title="应用抓包范围">应用</button>
-    </div>
     <button id="btnRefresh" class="btn" title="刷新状态" aria-label="刷新">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35A7.95 7.95 0 0012 4a8 8 0 108 8h-2a6 6 0 11-6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
       <span class="btn-text">刷新</span>
     </button>
-    <button id="btnInstallCert" class="btn" title="安装根证书（当前用户-受信任的根）">安装证书</button>
-    <button id="btnClear" class="btn">清空</button>
-    <button id="btnExport" class="btn">导出 HAR</button>
+    <button id="btnSettings" class="btn" title="设置" aria-label="设置">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14,12.94a7.43,7.43,0,0,0,.05-.94,7.43,7.43,0,0,0-.05-.94l2.11-1.65a.5.5,0,0,0,.12-.64l-2-3.46a.5.5,0,0,0-.6-.22l-2.49,1a7.28,7.28,0,0,0-1.63-.94l-.38-2.65A.5.5,0,0,0,11.68,2H8.32a.5.5,0,0,0-.49.41L7.45,5.06a7.28,7.28,0,0,0-1.63.94l-2.49-1a.5.5,0,0,0-.6.22l-2,3.46a.5.5,0,0,0,.12.64L3,11.06a7.43,7.43,0,0,0,0,1.88L.86,14.59a.5.5,0,0,0-.12.64l2,3.46a.5.5,0,0,0,.6.22l2.49-1a7.28,7.28,0,0,0,1.63.94l.38,2.65a.5.5,0,0,0,.49.41h3.36a.5.5,0,0,0,.49-.41l.38-2.65a7.28,7.28,0,0,0,1.63-.94l2.49,1a.5.5,0,0,0,.6-.22l2-3.46a.5.5,0,0,0-.12-.64ZM10,15a3,3,0,1,1,3-3A3,3,0,0,1,10,15Z"/></svg>
+      <span class="btn-text">设置</span>
+    </button>
   </div>
   <div class="toolbar">
     <div class="group">
@@ -103,6 +129,9 @@
       <input id="fHost" class="input" placeholder="host 过滤" style="width:140px"/>
       <input id="fPath" class="input" placeholder="path 过滤" style="width:180px"/>
       <input id="fStatus" class="input" placeholder="status" style="width:90px"/>
+    </div>
+    <div class="group">
+      <button id="btnClear" class="btn">清空</button>
     </div>
   </div>
   <div class="main">
@@ -139,6 +168,41 @@
     </div>
   </div>
   <div id="toast" class="toast"></div>
+  <!-- 设置面板 -->
+  <div id="settingsPanel" class="settings-panel" style="display:none; position: fixed; right: 16px; top: 56px; width: 640px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 36px rgba(0,0,0,0.4); z-index: 9;">
+    <div style="display:flex; align-items:center; justify-content: space-between; padding:10px 12px; border-bottom:1px solid var(--border); background: var(--panel-2); border-top-left-radius:10px; border-top-right-radius:10px;">
+      <div style="font-weight:600;">设置</div>
+      <div>
+        <button id="btnSettingsClose" class="btn">关闭</button>
+      </div>
+    </div>
+    <div style="padding:12px; display:grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+      <div class="group"><label>端口</label><input id="port" type="number" value="8888" class="input" style="width:120px"/></div>
+      <div class="group"><label>模式</label><select id="mode" class="select"><option value="global">全局</option><option value="pac">PAC</option></select></div>
+      <div class="group" style="grid-column: span 2;"><label>目标域</label><input id="targets" type="text" class="input" placeholder="example.com,*.foo.com" style="width:100%"/></div>
+      <div class="group" style="grid-column: span 2;"><label>路径前缀</label><input id="capPrefix" type="text" class="input" placeholder="/api,/v1" style="width:100%"/></div>
+      <div class="group" style="grid-column: span 2;"><label>延迟规则</label><input id="capDelays" type="text" class="input" placeholder="POST:/api/foo=5000;/bar=2000" style="width:100%"/></div>
+      <div class="group"><label>磁盘上限(MB)</label><input id="maxBodyDirMB" type="number" class="input" value="512" style="width:120px"/></div>
+      <div class="group" style="grid-column: span 2; align-items:flex-start;">
+        <div style="flex:0 0 auto; color: var(--muted); margin-top:4px;">改写/断点规则 (JSON)</div>
+        <textarea id="rewriteRules" class="kv" style="width:100%; height:120px;" placeholder='模板:
+阻断请求: [{"action":"block","match":{"pathPrefix":"/api/private"}}]
+Mock响应: [{"action":"mock","match":{"pathPrefix":"/login"},"mock":{"status":200,"headers":{"Content-Type":"application/json"},"bodyText":"{\"ok\":true}"}}]
+改写请求头: [{"action":"setheaders","match":{"hostIncludes":"api.com"},"setReqHeaders":{"X-Debug":"1"}}]'></textarea>
+      </div>
+      <div class="group" style="grid-column: span 2;">
+        <button id="btnInstallCert" class="btn" title="安装根证书（当前用户-受信任的根）">安装证书</button>
+        <button id="btnUninstallCert" class="btn" title="卸载根证书">卸载证书</button>
+        <button id="btnExport" class="btn" title="导出 HAR">导出 HAR</button>
+        <button id="btnPreviewPAC" class="btn" title="预览PAC配置">预览PAC</button>
+      </div>
+      <div id="certInfo" class="kv" style="grid-column: span 2; margin-top:8px;">证书信息：-</div>
+      <div id="pacPreview" class="kv" style="grid-column: span 2; margin-top:8px; min-height:120px; display:none;">PAC预览：</div>
+      <div style="grid-column: span 2; display:flex; justify-content:flex-end; gap:8px;">
+        <button id="btnSettingsApply" class="btn primary">应用</button>
+      </div>
+    </div>
+  </div>
   <script src="script.js"></script>
 </body>
 </html>

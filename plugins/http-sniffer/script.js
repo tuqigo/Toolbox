@@ -23,6 +23,8 @@
         pill.textContent = `运行中 ${d.host||'127.0.0.1'}:${d.port}`;
         pill.classList.remove('bad');
         pill.classList.add('ok');
+        // 端口自动回填（若被占用切换了端口）
+        try { const p = el('port'); const newPort = Number(d.port||0); if (newPort && Number(p.value) !== newPort) p.value = String(newPort); } catch {}
       } else {
         pill.textContent = '未运行';
         pill.classList.remove('ok');
@@ -32,6 +34,27 @@
         if (d.certInstalled) { pillCert.textContent = '证书已安装'; pillCert.classList.add('ok'); pillCert.classList.remove('bad'); }
         else { pillCert.textContent = '证书未安装'; pillCert.classList.add('bad'); pillCert.classList.remove('ok'); }
       }
+      // 展示证书信息
+      try {
+        const info = el('certInfo');
+        if (info) {
+          const thumb = d.caThumbprint || '-';
+          const path = d.caPath || '-';
+          let pacInfo = '-';
+          if (d.proxyState && d.proxyState.autoConfigURL) {
+            pacInfo = d.proxyState.autoConfigURL;
+            // 如果是文件路径，尝试读取内容
+            if (pacInfo.startsWith('file:')) {
+              try {
+                // 简化显示：路径 + 前50字符内容
+                const shortPath = pacInfo.replace('file:///', '').substring(0, 50);
+                pacInfo = `${shortPath}...`;
+              } catch {}
+            }
+          }
+          info.textContent = `证书指纹(SHA1): ${thumb}\nCA路径: ${path}\nPAC: ${pacInfo}`;
+        }
+      } catch {}
     }catch(e){ statusEl().textContent = '状态获取失败'; }
   }
 
@@ -54,12 +77,58 @@
   }
 
   function renderList(items){
+    const tb = tbody();
+    if (!tb) return;
+    // 首次或结构变化大：整表渲染
+    const needFull = !Array.isArray(lastItems) || lastItems.length === 0;
+    if (needFull) {
+      const rows = items.map(it => {
+        const cls = (Number(it.status)>=400)?' style="color:#ff7b72"':'';
+        return `<tr data-id="${it.id}"><td>${fmtTime(it.tsStart)}</td><td>${it.method}</td><td>${it.host}</td><td title="${it.path}">${it.path}</td><td${cls}>${it.status||''}</td><td>${it.duration||''}</td></tr>`;
+      }).join('');
+      tb.innerHTML = rows;
+      lastItems = items;
+      return;
+    }
+    // 增量渲染：仅追加新到达项，并修剪多余行
+    const oldFirst = lastItems[0] && lastItems[0].id;
+    const idx = items.findIndex(x => x && x.id === oldFirst);
+    // 若无法定位，或变化较大，回退整表渲染
+    if (idx < 0 || Math.abs(items.length - lastItems.length) > 50) {
+      const rows = items.map(it => {
+        const cls = (Number(it.status)>=400)?' style="color:#ff7b72"':'';
+        return `<tr data-id="${it.id}"><td>${fmtTime(it.tsStart)}</td><td>${it.method}</td><td>${it.host}</td><td title="${it.path}">${it.path}</td><td${cls}>${it.status||''}</td><td>${it.duration||''}</td></tr>`;
+      }).join('');
+      tb.innerHTML = rows;
+      lastItems = items;
+      return;
+    }
+    // idx 表示旧首项在新列表的位置，0..idx-1 是新增项（按最新在前）
+    if (idx > 0) {
+      const frag = document.createDocumentFragment();
+      for (let i = 0; i < idx; i++) {
+        const it = items[i];
+        const tr = document.createElement('tr');
+        tr.setAttribute('data-id', String(it.id));
+        const cls = (Number(it.status)>=400)?' style="color:#ff7b72"':'';
+        tr.innerHTML = `<td>${fmtTime(it.tsStart)}</td><td>${it.method}</td><td>${it.host}</td><td title="${it.path}">${it.path}</td><td${cls}>${it.status||''}</td><td>${it.duration||''}</td>`;
+        frag.appendChild(tr);
+      }
+      tb.insertBefore(frag, tb.firstChild);
+    }
+    // 修剪多余行（保持与 items 同步）
+    while (tb.children.length > items.length) {
+      tb.removeChild(tb.lastChild);
+    }
+    // 若数量更少，执行整表渲染以保持顺序
+    if (tb.children.length < items.length) {
+      const rows = items.map(it => {
+        const cls = (Number(it.status)>=400)?' style="color:#ff7b72"':'';
+        return `<tr data-id="${it.id}"><td>${fmtTime(it.tsStart)}</td><td>${it.method}</td><td>${it.host}</td><td title="${it.path}">${it.path}</td><td${cls}>${it.status||''}</td><td>${it.duration||''}</td></tr>`;
+      }).join('');
+      tb.innerHTML = rows;
+    }
     lastItems = items;
-    const rows = items.map(it => {
-      const cls = (Number(it.status)>=400)?' style="color:#ff7b72"':'';
-      return `<tr data-id="${it.id}"><td>${fmtTime(it.tsStart)}</td><td>${it.method}</td><td>${it.host}</td><td title="${it.path}">${it.path}</td><td${cls}>${it.status||''}</td><td>${it.duration||''}</td></tr>`;
-    }).join('');
-    tbody().innerHTML = rows;
   }
 
   async function loadDetail(id){
@@ -92,8 +161,17 @@
       pathPrefixes: (el('capPrefix') && el('capPrefix').value.trim()) || ''
     };
     const delayRules = (el('capDelays') && el('capDelays').value.trim()) || null;
-    await window.MT.invoke('capture.start', { host: '127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null, filters, delayRules });
-    await window.MT.invoke('capture.enableSystemProxy', { host:'127.0.0.1', port });
+    let rewriteRules = null;
+    try { const rr = (el('rewriteRules') && el('rewriteRules').value.trim()) || ''; if (rr) rewriteRules = JSON.parse(rr); } catch {}
+    const maxBodyDirMB = Number(el('maxBodyDirMB') && el('maxBodyDirMB').value) || 512;
+    const startRet = await window.MT.invoke('capture.start', { host: '127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null, filters, delayRules, rewriteRules, maxBodyDirMB });
+    // 自动切换系统代理模式
+    const mode = (el('mode') && el('mode').value) || 'global';
+    if (mode === 'pac') {
+      await window.MT.invoke('capture.enablePAC', { host:'127.0.0.1', port: (startRet && startRet.port) || port, targets, pathPrefixes: filters.pathPrefixes });
+    } else {
+      await window.MT.invoke('capture.enableSystemProxy', { host:'127.0.0.1', port: (startRet && startRet.port) || port });
+    }
     try { console.info('[HTTP-SNIFFER] start: proxy started and system proxy enabled on 127.0.0.1:%s', port); } catch {}
     await updateStatus();
     toast('已开启（已启动代理并启用系统代理）');
@@ -101,7 +179,9 @@
 
   async function stop(){
     await window.MT.invoke('capture.stop');
-    await window.MT.invoke('capture.disableSystemProxy');
+    // 同时关闭 PAC 与全局，确保干净
+    try { await window.MT.invoke('capture.disablePAC'); } catch {}
+    try { await window.MT.invoke('capture.disableSystemProxy'); } catch {}
     try { console.info('[HTTP-SNIFFER] stop: proxy stopped and system proxy disabled'); } catch {}
     await updateStatus();
     toast('已关闭（已停止代理并禁用系统代理）');
@@ -139,14 +219,6 @@
     el('btnStart').addEventListener('click', start);
     el('btnStop').addEventListener('click', stop);
     el('btnRefresh').addEventListener('click', updateStatus);
-    el('btnApplyTargets').addEventListener('click', async ()=>{
-      try {
-        await saveSettings();
-        await stop();
-        await start();
-        toast('已应用抓包范围');
-      } catch { toast('应用失败'); }
-    });
     // 系统代理开关已集成到开启/关闭按钮
     el('btnCopyCurl').addEventListener('click', async ()=>{
       try {
@@ -189,6 +261,39 @@
     el('btnClear').addEventListener('click', clearAll);
     el('btnExport').addEventListener('click', exportHar);
     el('btnInstallCert').addEventListener('click', installCert);
+    el('btnUninstallCert').addEventListener('click', async ()=>{
+      try {
+        const ret = await window.MT.invoke('capture.uninstallCert');
+        if (ret && (ret.ok || (ret.data && ret.data.ok))) toast('证书已卸载'); else toast('卸载失败');
+        await updateStatus();
+      } catch { toast('卸载失败'); }
+    });
+    el('btnPreviewPAC').addEventListener('click', async ()=>{
+      try {
+        const port = Number(el('port').value||8888);
+        const targets = el('targets').value.trim();
+        const pathPrefixes = (el('capPrefix') && el('capPrefix').value.trim()) || '';
+        const ret = await window.MT.invoke('capture.previewPAC', { 
+          host: '127.0.0.1', 
+          port, 
+          targets: targets||null, 
+          pathPrefixes: pathPrefixes||null 
+        });
+        const preview = el('pacPreview');
+        if (ret && ret.ok && ret.pac) {
+          preview.textContent = `基于当前设置生成的PAC配置：\n\n${ret.pac}`;
+          preview.style.display = 'block';
+          toast('PAC预览已生成');
+        } else {
+          preview.textContent = 'PAC预览生成失败: ' + (ret.error || '未知错误');
+          preview.style.display = 'block';
+        }
+      } catch (e) { 
+        const preview = el('pacPreview');
+        preview.textContent = 'PAC预览生成失败: ' + (e && e.message || '网络错误');
+        preview.style.display = 'block';
+      }
+    });
 
     el('fMethod').addEventListener('change', refreshList);
     el('fHost').addEventListener('input', debounce(refreshList, 200));
@@ -202,6 +307,36 @@
       selectedId = id;
       loadDetail(id);
     });
+
+    // 设置面板
+    const panel = el('settingsPanel');
+    const btnSettings = el('btnSettings');
+    const btnSettingsClose = el('btnSettingsClose');
+    const btnSettingsApply = el('btnSettingsApply');
+    if (btnSettings) btnSettings.addEventListener('click', (e)=>{ 
+      e.stopPropagation(); 
+      if (panel) panel.style.display = 'block'; 
+    });
+    if (btnSettingsClose) btnSettingsClose.addEventListener('click', ()=>{ if (panel) panel.style.display = 'none'; });
+    if (btnSettingsApply) btnSettingsApply.addEventListener('click', async ()=>{
+      try {
+        await saveSettings();
+        await stop();
+        await start();
+        if (panel) panel.style.display = 'none';
+        toast('设置已应用');
+      } catch { toast('应用失败'); }
+    });
+    
+    // 点击外部隐藏设置面板
+    document.addEventListener('click', (e) => {
+      if (panel && panel.style.display === 'block') {
+        if (!panel.contains(e.target)) {
+          panel.style.display = 'none';
+        }
+      }
+    });
+    if (panel) panel.addEventListener('click', (e) => e.stopPropagation());
   }
 
   function debounce(fn, wait){ let t=null; return function(){ clearTimeout(t); t=setTimeout(()=>fn.apply(this, arguments), wait); } }
@@ -222,7 +357,10 @@
       if (!window.MT || !window.MT.db) return;
       const targets = el('targets').value.trim();
       const pathPrefixes = (el('capPrefix') && el('capPrefix').value.trim()) || '';
-      const settings = { targets, pathPrefixes };
+      const rewriteRules = (el('rewriteRules') && el('rewriteRules').value) || '';
+      const mode = (el('mode') && el('mode').value) || 'global';
+      const maxBodyDirMB = Number(el('maxBodyDirMB') && el('maxBodyDirMB').value) || 512;
+      const settings = { targets, pathPrefixes, rewriteRules, mode, maxBodyDirMB };
       await window.MT.db.put('http-sniffer.settings', settings);
     } catch (e) { try { console.warn('[HTTP-SNIFFER] saveSettings failed', e && e.message); } catch {} }
   }
@@ -235,6 +373,9 @@
       if (val && (typeof val === 'object')) {
         if (val.targets != null) el('targets').value = String(val.targets || '');
         if (val.pathPrefixes != null && el('capPrefix')) el('capPrefix').value = String(val.pathPrefixes || '');
+        if (val.rewriteRules != null && el('rewriteRules')) el('rewriteRules').value = String(val.rewriteRules || '');
+        if (val.mode != null && el('mode')) el('mode').value = String(val.mode || 'global');
+        if (val.maxBodyDirMB != null && el('maxBodyDirMB')) el('maxBodyDirMB').value = String(val.maxBodyDirMB || '512');
         return true;
       }
       return false;
@@ -262,7 +403,8 @@
     try {
       if (timer) clearTimeout(timer);
       // 自动清理：禁用系统代理 + 停止代理
-      await window.MT.invoke('capture.disableSystemProxy');
+      try { await window.MT.invoke('capture.disablePAC'); } catch {}
+      try { await window.MT.invoke('capture.disableSystemProxy'); } catch {}
       await window.MT.invoke('capture.stop');
     } catch {}
   });

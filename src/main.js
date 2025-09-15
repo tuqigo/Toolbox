@@ -944,6 +944,12 @@ class MiniToolbox {
             try { const ret = await this.captureProxy.installCert(); return { ok: ret && ret.ok, data: ret, error: ret && ret.ok ? undefined : 'install failed' }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
           case 'capture.uninstallCert':
             try { const ret = await this.captureProxy.uninstallCert(); return { ok: ret && ret.ok, data: ret, error: ret && ret.ok ? undefined : 'uninstall failed' }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          case 'capture.enablePAC':
+            try { const ret = await this.captureProxy.enablePAC(payload || {}); return { ok: ret && ret.ok, data: ret, error: ret && ret.ok ? undefined : (ret && ret.error) || 'enable PAC failed' }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          case 'capture.disablePAC':
+            try { const ret = await this.captureProxy.disablePAC(); return { ok: ret && ret.ok, data: ret, error: ret && ret.ok ? undefined : 'disable PAC failed' }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          case 'capture.previewPAC':
+            try { const ret = this.captureProxy.previewPAC(payload || {}); return { ok: ret && ret.ok, data: ret, error: ret && ret.ok ? undefined : (ret && ret.error) || 'preview PAC failed' }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
           case 'capture.enableSystemProxy':
             try { const ret = await this.captureProxy.enableSystemProxy(payload || {}); return { ok: ret && ret.ok, data: ret, error: ret && ret.ok ? undefined : (ret && ret.error) || 'enable failed' }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
           case 'capture.disableSystemProxy':
@@ -2000,6 +2006,8 @@ class MiniToolbox {
     app.on('before-quit', () => {
       this.stopClipboardMonitoring();
       globalShortcut.unregisterAll();
+      // 先关闭 PAC，再关闭系统代理，确保脚本模式不会遗留
+      try { this.captureProxy && this.captureProxy.disablePAC && this.captureProxy.disablePAC(); } catch {}
       try { this.captureProxy && this.captureProxy.disableSystemProxy && this.captureProxy.disableSystemProxy(); } catch {}
       try { this.captureProxy && this.captureProxy.stop && this.captureProxy.stop(); } catch {}
       try { if (this.tray) { this.tray.destroy(); this.tray = null; } } catch {}
