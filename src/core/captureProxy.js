@@ -61,14 +61,6 @@ class CaptureProxyService {
     // 系统代理备份文件
     this.proxyBackupFile = path.join(this.captureDir, 'proxy-backup.json');
 
-    // PAC 文件路径
-    this.pacFile = path.join(this.captureDir, 'proxy.pac');
-
-    // PAC 本地服务（为避免 file:/// 兼容性问题，优先走 http 本地服务）
-    this._pacHttpServer = null;
-    this._pacHttpPort = 0;
-    this._pacContent = '';
-
     // 目录配额（MB）与配额检查节流
     this.maxBodyDirMB = Number(options.maxBodyDirMB || 512);
     this._lastQuotaCheckTs = 0;
@@ -83,7 +75,6 @@ class CaptureProxyService {
     this._ourServer = null; // 形如 host:port
     this._upstreamHttpUrl = null;
     this._upstreamHttpsUrl = null;
-    this._upstreamDisabledUntil = 0; // 上游不可用临时熔断
   }
 
   async ensureDirs() {
@@ -121,14 +112,13 @@ class CaptureProxyService {
     // 核心钩子：请求/响应
     this.proxy.onError((ctx, err, kind) => {
       try { if (!this.isQuiet) console.error('[CAPTURE][onError]', kind, err && err.message); } catch {}
-      // 若上游错误，触发短暂熔断，避免持续不可达导致页面不通（仅当本次请求实际使用了上游时）
+      // 移除自动熔断机制，让用户手动控制链式代理
       try {
         const msg = (err && err.message) || '';
-        const transient = /ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|socket hang up/i.test(msg);
         const usedUpstream = !!(ctx && ctx.__mtUsedUpstream);
-        if (usedUpstream && kind && String(kind).includes('PROXY_TO_SERVER_REQUEST_ERROR') && transient) {
-          this._upstreamDisabledUntil = Date.now() + 15000; // 15s 熔断
-          if (!this.isQuiet) console.warn('[CAPTURE][UPSTREAM][disabled]', 'for 15s due to', msg);
+        const host = this._getHost(ctx) || '';
+        if (usedUpstream && !this.isQuiet) {
+          console.log('[CAPTURE][UPSTREAM][error]', 'host=', host, 'error=', msg);
         }
       } catch {}
     });
@@ -139,8 +129,7 @@ class CaptureProxyService {
     this.proxy.onRequest((ctx, next) => {
       // 链式上游代理：为每个出站请求按需设置 agent（绕过列表不套用）
       try {
-        const now = Date.now();
-        const upstreamOk = (this._httpUpstreamAgent || this._httpsUpstreamAgent) && (!this._upstreamDisabledUntil || now >= this._upstreamDisabledUntil);
+        const upstreamOk = (this._httpUpstreamAgent || this._httpsUpstreamAgent);
         if (upstreamOk) {
           const host = this._getHost(ctx) || '';
           if (!this._isBypassedHost(host)) {
@@ -163,14 +152,6 @@ class CaptureProxyService {
               if (!this.isQuiet) console.log('[CAPTURE][CHAIN][bypass] client->MITM->DIRECT host=%s path=%s id=%s', host, path, (ctx.__mtId||''));
             } catch {}
           }
-        }
-        // 日志：存在上游但处于熔断窗口，跳过使用
-        else if ((this._httpUpstreamAgent || this._httpsUpstreamAgent) && this._upstreamDisabledUntil && now < this._upstreamDisabledUntil) {
-          try {
-            const until = new Date(this._upstreamDisabledUntil).toISOString();
-            const host = this._getHost(ctx) || '';
-            if (!this.isQuiet) console.log('[CAPTURE][CHAIN][skip] upstream temporarily disabled until %s host=%s', until, host);
-          } catch {}
         }
       } catch {}
       // 改写/阻断/Mock：优先处理
@@ -509,80 +490,7 @@ class CaptureProxyService {
     return JSON.stringify(log, null, 2);
   }
 
-  // 启用 PAC（Windows）
-  async enablePAC({ host = '127.0.0.1', port = null, targets = null, pathPrefixes = null } = {}) {
-    if (process.platform !== 'win32') return { ok: false, error: 'only supported on windows' };
-    const p = Number(port || this.port || 8888);
-    const server = `${host}:${p}`;
-    const pacPath = this.pacFile;
-    try { await this.ensureDirs(); } catch {}
-    // 备份当前系统代理
-    try {
-      const st = await this.querySystemProxy();
-      const prev = { enable: st.enable, server: st.server, override: st.override, autoConfigURL: st.autoConfigURL, autoDetect: st.autoDetect };
-      await this._saveProxyBackup(prev, { ourServer: server, ourPacUrl: this._fileToFileUrl(pacPath) });
-    } catch {}
-    // 生成 PAC
-    const pac = this._generatePacContent({ server, targets, pathPrefixes });
-    await fs.writeFile(pacPath, pac, 'utf8');
-    this._pacContent = pac;
-    // 尝试使用本地 http 服务提供 PAC，兼容某些应用不支持 file:/// 的情况
-    let pacUrl = this._fileToFileUrl(pacPath);
-    try {
-      if (!this._pacHttpServer) {
-        await new Promise((resolve, reject) => {
-          try {
-            const srv = http.createServer((req, res) => {
-              try {
-                res.writeHead(200, { 'Content-Type': 'application/x-ns-proxy-autoconfig; charset=utf-8' });
-                res.end(this._pacContent || pac);
-              } catch { try { res.end(''); } catch {} }
-            });
-            srv.listen(0, '127.0.0.1', () => {
-              try {
-                const addr = srv.address();
-                this._pacHttpServer = srv;
-                this._pacHttpPort = addr && addr.port || 0;
-                resolve();
-              } catch (e) { reject(e); }
-            });
-          } catch (e) { reject(e); }
-        });
-      }
-      if (this._pacHttpPort) {
-        pacUrl = `http://127.0.0.1:${this._pacHttpPort}/proxy.pac`;
-      }
-    } catch (e) {
-      try { if (!this.isQuiet) console.warn('[CAPTURE][PAC][http-server][fail]', e && e.message); } catch {}
-    }
-    // 注册表切换为 PAC
-    try { if (!this.isQuiet) console.log('[CAPTURE][PAC][enable] setting registry with pacUrl:', pacUrl); } catch {}
-    const ok = await this._setProxyRegistry({ enable: 0, server: '', override: '', autoConfigURL: pacUrl, autoDetect: 0 });
-    try { if (!this.isQuiet) console.log('[CAPTURE][PAC][enable] registry set result:', ok); } catch {}
-    await this._notifyInternetSettingsChanged();
-    const state = await this.querySystemProxy();
-    try { if (!this.isQuiet) console.log('[CAPTURE][PAC][enable] final state:', state); } catch {}
-    return { ok: !!ok, pacUrl, server };
-  }
 
-  async disablePAC() {
-    if (process.platform !== 'win32') return { ok: false, error: 'only supported on windows' };
-    let ok = await this._restoreProxyBackup();
-    // 无论是否恢复成功，确保 AutoConfigURL 清空，避免“使用脚本”遗留为开
-    try {
-      const st = await this.querySystemProxy();
-      if (st && st.autoConfigURL) {
-        const cleared = await this._setProxyRegistry({ autoConfigURL: '' });
-        ok = ok && cleared;
-      }
-    } catch {}
-    // 关闭 PAC 本地服务
-    try { if (this._pacHttpServer) { this._pacHttpServer.close(); this._pacHttpServer = null; this._pacHttpPort = 0; } } catch {}
-    await this._notifyInternetSettingsChanged();
-    const state = await this.querySystemProxy();
-    try { if (!this.isQuiet) console.log('[CAPTURE][PAC][disable][state]', state); } catch {}
-    return { ok, state };
-  }
 
   // 启用系统代理（Windows，当前用户范围）
   async enableSystemProxy({ host = '127.0.0.1', port = null } = {}) {
@@ -790,14 +698,14 @@ class CaptureProxyService {
     } catch {}
   }
 
-  async _saveProxyBackup(originalState, { ourServer, ourPacUrl } = {}) {
+  async _saveProxyBackup(originalState, { ourServer } = {}) {
     try {
       const exists = await fs.pathExists(this.proxyBackupFile);
       let data = exists ? await fs.readJson(this.proxyBackupFile) : null;
       if (!data || !data.original) {
         data = { original: { enable: originalState && originalState.enable, server: originalState && originalState.server, override: originalState && originalState.override, autoConfigURL: originalState && originalState.autoConfigURL, autoDetect: originalState && originalState.autoDetect }, last: null };
       }
-      data.last = { setBy: 'MiniToolbox', ourServer: String(ourServer || ''), ourPacUrl: String(ourPacUrl || ''), at: Date.now() };
+      data.last = { setBy: 'MiniToolbox', ourServer: String(ourServer || ''), at: Date.now() };
       await fs.writeJson(this.proxyBackupFile, data, { spaces: 2 });
       try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][backup][save]', data); } catch {}
     } catch {}
@@ -1513,6 +1421,57 @@ class CaptureProxyService {
     return result;
   }
 
+  // ---------- 手动测试上游连通性 ----------
+  async testUpstreamConnectivity({ upstream = null } = {}) {
+    try {
+      // 如果没有指定upstream，使用当前配置的
+      let testUpstream = upstream;
+      if (!testUpstream) {
+        testUpstream = this._upstreamHttpUrl || this._upstreamHttpsUrl;
+      }
+      
+      if (!testUpstream) {
+        return { ok: false, error: '未配置上游代理' };
+      }
+
+      const startTime = Date.now();
+      
+      // 基础TCP连接测试
+      const tcpOk = await this._basicTcpProbe(testUpstream);
+      if (!tcpOk) {
+        return { 
+          ok: false, 
+          error: 'TCP连接失败',
+          details: { tcp: false, http: false, duration: Date.now() - startTime }
+        };
+      }
+
+      // 功能性HTTP测试
+      const httpOk = await this._functionalProxyTest(testUpstream);
+      const duration = Date.now() - startTime;
+      
+      if (httpOk) {
+        return { 
+          ok: true, 
+          message: '上游代理连通正常',
+          details: { tcp: true, http: true, duration, upstream: testUpstream }
+        };
+      } else {
+        return { 
+          ok: false, 
+          error: '代理功能测试失败',
+          details: { tcp: true, http: false, duration, upstream: testUpstream }
+        };
+      }
+    } catch (e) {
+      return { 
+        ok: false, 
+        error: e && e.message || '测试失败',
+        details: { exception: true }
+      };
+    }
+  }
+
   // ---------- 辅助：端口探测与目录配额 ----------
   async _findAvailablePort(host, startPort, maxSteps = 20) {
     const tryOne = (p) => new Promise((resolve, reject) => {
@@ -1560,71 +1519,8 @@ class CaptureProxyService {
     } catch {}
   }
 
-  _generatePacContent({ server, targets, pathPrefixes }) {
-    const lines = [];
-    lines.push('function FindProxyForURL(url, host) {');
-    const conds = [];
-    const proxyExpr = `\"PROXY ${server}\"`;
-    // 本地与内网直连（基础绕过）
-    lines.push('  if (isPlainHostName(host) || host == "localhost") return "DIRECT";');
-    lines.push('  var resolved = dnsResolve(host);');
-    lines.push('  if (resolved) {');
-    lines.push('    if (shExpMatch(resolved, "127.*")) return "DIRECT";');
-    lines.push('    if (isInNet(resolved, "10.0.0.0", "255.0.0.0")) return "DIRECT";');
-    lines.push('    if (isInNet(resolved, "172.16.0.0", "255.240.0.0")) return "DIRECT";');
-    lines.push('    if (isInNet(resolved, "192.168.0.0", "255.255.0.0")) return "DIRECT";');
-    lines.push('  }');
-    // 优先按域名匹配（若配置了目标域）
-    try {
-      const set = this._normalizeTargetHosts(targets);
-      if (set && set.size) {
-        for (const t of set) {
-          if (!t) continue;
-          if (String(t).startsWith('*.')) {
-            const bare = String(t).slice(2);
-            conds.push(`dnsDomainIs(host, \"${bare}\") || shExpMatch(host, \"*.${bare}\")`);
-          } else {
-            conds.push(`dnsDomainIs(host, \"${t}\") || shExpMatch(host, \"*.${t}\") || host == \"${t}\"`);
-          }
-        }
-      }
-    } catch {}
-    // 再按路径匹配（可选）
-    try {
-      const f = this._normalizeFilters({ pathPrefixes });
-      if (f && f.pathPrefixes && f.pathPrefixes.length) {
-        for (const p of f.pathPrefixes) {
-          conds.push(`shExpMatch(url, \"*${p}*\")`);
-        }
-      }
-    } catch {}
-    if (conds.length) {
-      lines.push(`  if (${conds.join(' || ')}) return ${proxyExpr};`);
-    }
-    // 恢复：未命中条件时默认为 DIRECT，由用户通过 targets/pathPrefixes 控制劫持范围
-    lines.push('  return "DIRECT";');
-    lines.push('}');
-    return lines.join('\n');
-  }
 
-  _fileToFileUrl(p) {
-    try {
-      let fp = path.resolve(p);
-      let url = 'file:///' + fp.replace(/\\/g, '/');
-      return url;
-    } catch { return ''; }
-  }
 
-  // 预览PAC内容（不实际启用）
-  previewPAC({ host = '127.0.0.1', port = 8888, targets = null, pathPrefixes = null } = {}) {
-    try {
-      const server = `${host}:${port}`;
-      const pac = this._generatePacContent({ server, targets, pathPrefixes });
-      return { ok: true, pac, server };
-    } catch (e) {
-      return { ok: false, error: e && e.message || String(e) };
-    }
-  }
 
   // ---------- 上游代理：准备/解析/绕过 ----------
   async _prepareUpstream(upstream) {
@@ -1632,7 +1528,6 @@ class CaptureProxyService {
       this._httpUpstreamAgent = null;
       this._httpsUpstreamAgent = null;
       this._upstreamBypass = [];
-      this._upstreamDisabledUntil = 0;
       if (!upstream) return;
 
       // 动态按需加载依赖
@@ -1666,10 +1561,10 @@ class CaptureProxyService {
         try { const backup = await this._loadProxyBackup(); orig = backup && backup.original; } catch {}
         const st = await this.querySystemProxy();
         const server = (orig && orig.server) || (st && st.server) || '';
-        // 强制链式：不继承系统 ProxyOverride，避免在家庭网络下被大范围绕过
-        const override = '';
-        const parsed = this._parseWinProxyServer(server);
-        httpUrl = parsed.http; httpsUrl = parsed.https; bypassRaw = override || '';
+      // 强制链式：不继承系统 ProxyOverride，避免在家庭网络下被大范围绕过，但保留内网地址绕过
+      const override = '<local>;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*;169.254.*';
+      const parsed = this._parseWinProxyServer(server);
+      httpUrl = parsed.http; httpsUrl = parsed.https; bypassRaw = override || '';
         if (parsed.socks && String(parsed.socks).trim()) {
           const socksAddr = String(parsed.socks).trim();
           httpUrl = `socks5://${socksAddr}`;
@@ -1725,19 +1620,9 @@ class CaptureProxyService {
         if (/^https:/i.test(url)) return new __HttpsProxyAgentClass(url);
         return new __HttpProxyAgentClass(url);
       };
-      // 启动前做一次 reachability 探测，不可达则禁用上游
-      const okHttp = await this._probeUpstreamReachable(httpUrl);
-      const okHttps = await this._probeUpstreamReachable(httpsUrl);
-      if (!okHttp && !okHttps) {
-        this._httpUpstreamAgent = null;
-        this._httpsUpstreamAgent = null;
-        this._upstreamHttpUrl = null;
-        this._upstreamHttpsUrl = null;
-        if (!this.isQuiet) console.warn('[CAPTURE][UPSTREAM][skip] upstream not reachable, use DIRECT');
-      } else {
-        this._httpUpstreamAgent = okHttp ? makeAgent(httpUrl) : null;
-        this._httpsUpstreamAgent = okHttps ? makeAgent(httpsUrl) : (okHttp ? makeAgent(httpUrl) : null);
-      }
+      // 直接创建 Agent，不做启动时探测（用户可手动测试）
+      this._httpUpstreamAgent = makeAgent(httpUrl);
+      this._httpsUpstreamAgent = makeAgent(httpsUrl) || makeAgent(httpUrl);
       this._upstreamHttpUrl = httpUrl;
       this._upstreamHttpsUrl = httpsUrl;
       this._upstreamBypass = this._parseBypassList(bypassRaw);
@@ -1751,6 +1636,21 @@ class CaptureProxyService {
   async _probeUpstreamReachable(url) {
     try {
       if (!url) return false;
+      // 先做基础TCP连接测试
+      const basicReachable = await this._basicTcpProbe(url);
+      if (!basicReachable) {
+        try { if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][probe] TCP connection failed:', url); } catch {}
+        return false;
+      }
+      // 通过实际HTTP请求测试代理功能
+      const functionalTest = await this._functionalProxyTest(url);
+      try { if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][probe]', url, 'TCP:', basicReachable, 'HTTP:', functionalTest); } catch {}
+      return functionalTest;
+    } catch { return false; }
+  }
+
+  async _basicTcpProbe(url) {
+    try {
       const u = new URL(/^socks/i.test(url) ? url.replace(/^socks5?/i, 'http') : url);
       const host = u.hostname;
       const port = u.port ? Number(u.port) : (/^https:/i.test(url) ? 443 : 80);
@@ -1763,6 +1663,78 @@ class CaptureProxyService {
         } catch { resolve(false); }
       });
     } catch { return false; }
+  }
+
+  async _functionalProxyTest(proxyUrl) {
+    try {
+      // 动态加载代理agent
+      let Agent = null;
+      if (/^socks/i.test(proxyUrl)) {
+        if (!__SocksProxyAgentClass) {
+          const mod = require('socks-proxy-agent');
+          __SocksProxyAgentClass = (mod && (mod.SocksProxyAgent || mod.default)) || mod;
+        }
+        Agent = __SocksProxyAgentClass;
+      } else if (/^https:/i.test(proxyUrl)) {
+        if (!__HttpsProxyAgentClass) {
+          const mod = require('https-proxy-agent');
+          __HttpsProxyAgentClass = (mod && (mod.HttpsProxyAgentClass || mod.default)) || mod;
+        }
+        Agent = __HttpsProxyAgentClass;
+      } else {
+        if (!__HttpProxyAgentClass) {
+          const mod = require('http-proxy-agent');
+          __HttpProxyAgentClass = (mod && (mod.HttpProxyAgent || mod.default)) || mod;
+        }
+        Agent = __HttpProxyAgentClass;
+      }
+      
+      if (!Agent) return false;
+      
+      const agent = new Agent(proxyUrl);
+      const testUrls = [
+        'http://www.google.com/generate_204',  // Google 连通性测试
+        'http://connectivitycheck.gstatic.com/generate_204', // Google 备用
+        'http://httpbin.org/get', // 备用测试服务
+      ];
+      
+      for (const testUrl of testUrls) {
+        try {
+          const result = await this._makeTestRequest(testUrl, agent);
+          if (result) {
+            try { if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][probe] functional test OK via', testUrl); } catch {}
+            return true;
+          }
+        } catch (e) {
+          try { if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][probe] test failed for', testUrl, e.message); } catch {}
+        }
+      }
+      return false;
+    } catch { return false; }
+  }
+
+  async _makeTestRequest(url, agent) {
+    return new Promise((resolve) => {
+      try {
+        const http = require('http');
+        const options = new URL(url);
+        options.agent = agent;
+        options.timeout = 3000;
+        options.method = 'HEAD'; // 使用HEAD减少流量
+        
+        const req = http.request(options, (res) => {
+          try {
+            // 200-299 或者 204 (No Content) 都认为是成功
+            const success = (res.statusCode >= 200 && res.statusCode < 300) || res.statusCode === 204;
+            resolve(success);
+          } catch { resolve(false); }
+        });
+        
+        req.on('timeout', () => { try { req.destroy(); } catch {}; resolve(false); });
+        req.on('error', () => resolve(false));
+        req.end();
+      } catch { resolve(false); }
+    });
   }
 
   _parseWinProxyServer(s) {
@@ -1790,9 +1762,20 @@ class CaptureProxyService {
   _parseBypassList(s) {
     try {
       const items = String(s || '').split(';').map(x => x.trim()).filter(Boolean);
-      const set = new Set(items.concat(['localhost','127.0.0.1','::1','<local>']));
+      // 默认绕过内网地址和本地地址
+      const defaultBypass = [
+        'localhost', '127.0.0.1', '::1', '<local>',
+        '*.local', '*.lan', '*.intranet',
+        '10.*', '172.16.*', '172.17.*', '172.18.*', '172.19.*',
+        '172.20.*', '172.21.*', '172.22.*', '172.23.*', '172.24.*',
+        '172.25.*', '172.26.*', '172.27.*', '172.28.*', '172.29.*',
+        '172.30.*', '172.31.*', '192.168.*', '169.254.*'
+      ];
+      const set = new Set(items.concat(defaultBypass));
       return Array.from(set);
-    } catch { return ['localhost','127.0.0.1','::1','<local>']; }
+    } catch { 
+      return ['localhost','127.0.0.1','::1','<local>', '10.*', '172.16.*', '172.17.*', '172.18.*', '172.19.*', '172.20.*', '172.21.*', '172.22.*', '172.23.*', '172.24.*', '172.25.*', '172.26.*', '172.27.*', '172.28.*', '172.29.*', '172.30.*', '172.31.*', '192.168.*', '169.254.*']; 
+    }
   }
 
   _isBypassedHost(host) {
@@ -1800,14 +1783,42 @@ class CaptureProxyService {
       const h = String(host || '').toLowerCase();
       if (!h) return true;
       if (!this._upstreamBypass || !this._upstreamBypass.length) return false;
+      
+      // 先检查是否是IP地址
+      const isIPv4 = /^\d+\.\d+\.\d+\.\d+$/.test(h);
+      
       for (const patRaw of this._upstreamBypass) {
         const pat = String(patRaw || '').toLowerCase();
-        if (pat === '<local>') { if (!h.includes('.')) return true; continue; }
+        
+        if (pat === '<local>') { 
+          if (!h.includes('.')) return true; 
+          continue; 
+        }
+        
         if (pat.startsWith('*.')) {
           const bare = pat.slice(2);
           if (h === bare || h.endsWith('.' + bare)) return true;
           continue;
         }
+        
+        // IP地址模式匹配（如 10.* 匹配 10.10.200.232）
+        if (pat.includes('*') && isIPv4) {
+          const patParts = pat.split('.');
+          const hostParts = h.split('.');
+          if (patParts.length === hostParts.length) {
+            let match = true;
+            for (let i = 0; i < patParts.length; i++) {
+              if (patParts[i] !== '*' && patParts[i] !== hostParts[i]) {
+                match = false;
+                break;
+              }
+            }
+            if (match) return true;
+          }
+          continue;
+        }
+        
+        // 精确匹配或域名后缀匹配
         if (h === pat || h.endsWith('.' + pat)) return true;
       }
       return false;

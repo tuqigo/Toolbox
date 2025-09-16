@@ -178,9 +178,19 @@
     </div>
     <div style="padding:12px; display:grid; grid-template-columns: 1fr 1fr; gap: 10px;">
       <div class="group"><label>端口</label><input id="port" type="number" value="8888" class="input" style="width:120px"/></div>
-      <div class="group"><label>模式</label><select id="mode" class="select"><option value="global">全局</option><option value="pac">PAC</option></select></div>
+      <div class="group"><label>模式</label><span class="input" style="background: var(--panel-2); border-color: transparent; color: var(--muted);">全局</span></div>
       <div class="group"><label>链式代理</label><input id="enableUpstream" type="checkbox" checked/></div>
-      <div class="group"><label>上游地址</label><input id="upstreamAddr" type="text" class="input" placeholder="system / http://127.0.0.1:7890 / socks5://127.0.0.1:10808" value="system" style="width:100%"/></div>
+      <div class="group" style="grid-column: span 2;">
+        <label>上游地址</label>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <input id="upstreamAddr" type="text" class="input" placeholder="system / http://127.0.0.1:7890 / socks5://127.0.0.1:10808" value="system" style="flex: 1"/>
+          <button id="btnTestUpstream" class="btn" title="测试上游连通性">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+            <span class="btn-text">测试</span>
+          </button>
+          <div id="upstreamStatus" class="pill" style="min-width: 60px; text-align: center;">未测试</div>
+        </div>
+      </div>
       <div class="group" style="grid-column: span 2;"><label>目标域</label><input id="targets" type="text" class="input" placeholder="example.com,*.foo.com" style="width:100%"/></div>
       <div class="group" style="grid-column: span 2;"><label>路径前缀</label><input id="capPrefix" type="text" class="input" placeholder="/api,/v1" style="width:100%"/></div>
       <div class="group" style="grid-column: span 2;"><label>延迟规则</label><input id="capDelays" type="text" class="input" placeholder="POST:/api/foo=5000;/bar=2000" style="width:100%"/></div>
@@ -196,10 +206,8 @@ Mock响应: [{"action":"mock","match":{"pathPrefix":"/login"},"mock":{"status":2
         <button id="btnInstallCert" class="btn" title="安装根证书（当前用户-受信任的根）">安装证书</button>
         <button id="btnUninstallCert" class="btn" title="卸载根证书">卸载证书</button>
         <button id="btnExport" class="btn" title="导出 HAR">导出 HAR</button>
-        <button id="btnPreviewPAC" class="btn" title="预览PAC配置">预览PAC</button>
       </div>
       <div id="certInfo" class="kv" style="grid-column: span 2; margin-top:8px;">证书信息：-</div>
-      <div id="pacPreview" class="kv" style="grid-column: span 2; margin-top:8px; min-height:120px; display:none;">PAC预览：</div>
       <div style="grid-column: span 2; display:flex; justify-content:flex-end; gap:8px;">
         <button id="btnSettingsApply" class="btn primary">应用</button>
       </div>

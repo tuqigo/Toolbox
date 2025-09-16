@@ -186,13 +186,8 @@
     const payload = { host: '127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null, filters, delayRules, rewriteRules, maxBodyDirMB };
     if (upstreamParam) payload.upstream = upstreamParam;
     const startRet = await window.MT.invoke('capture.start', payload);
-    // 自动切换系统代理模式
-    const mode = (el('mode') && el('mode').value) || 'global';
-    if (mode === 'pac') {
-      await window.MT.invoke('capture.enablePAC', { host:'127.0.0.1', port: (startRet && startRet.port) || port, targets, pathPrefixes: filters.pathPrefixes });
-    } else {
-      await window.MT.invoke('capture.enableSystemProxy', { host:'127.0.0.1', port: (startRet && startRet.port) || port });
-    }
+    // 启用全局系统代理
+    await window.MT.invoke('capture.enableSystemProxy', { host:'127.0.0.1', port: (startRet && startRet.port) || port });
     try { console.info('[HTTP-SNIFFER] start: proxy started and system proxy enabled on 127.0.0.1:%s', port); } catch {}
     await updateStatus();
     toast('已开启（已启动代理并启用系统代理）');
@@ -200,8 +195,7 @@
 
   async function stop(){
     await window.MT.invoke('capture.stop');
-    // 同时关闭 PAC 与全局，确保干净
-    try { await window.MT.invoke('capture.disablePAC'); } catch {}
+    // 禁用系统代理
     try { await window.MT.invoke('capture.disableSystemProxy'); } catch {}
     try { console.info('[HTTP-SNIFFER] stop: proxy stopped and system proxy disabled'); } catch {}
     await updateStatus();
@@ -289,30 +283,51 @@
         await updateStatus();
       } catch { toast('卸载失败'); }
     });
-    el('btnPreviewPAC').addEventListener('click', async ()=>{
+    el('btnTestUpstream').addEventListener('click', async ()=>{
       try {
-        const port = Number(el('port').value||8888);
-        const targets = el('targets').value.trim();
-        const pathPrefixes = (el('capPrefix') && el('capPrefix').value.trim()) || '';
-        const ret = await window.MT.invoke('capture.previewPAC', { 
-          host: '127.0.0.1', 
-          port, 
-          targets: targets||null, 
-          pathPrefixes: pathPrefixes||null 
-        });
-        const preview = el('pacPreview');
-        if (ret && ret.ok && ret.pac) {
-          preview.textContent = `基于当前设置生成的PAC配置：\n\n${ret.pac}`;
-          preview.style.display = 'block';
-          toast('PAC预览已生成');
-        } else {
-          preview.textContent = 'PAC预览生成失败: ' + (ret.error || '未知错误');
-          preview.style.display = 'block';
+        const statusEl = el('upstreamStatus');
+        const btnEl = el('btnTestUpstream');
+        
+        // 更新UI状态
+        statusEl.textContent = '测试中...';
+        statusEl.className = 'pill';
+        btnEl.disabled = true;
+        
+        // 获取当前上游地址配置
+        const enableUpstream = el('enableUpstream') ? !!el('enableUpstream').checked : true;
+        if (!enableUpstream) {
+          statusEl.textContent = '已禁用';
+          statusEl.className = 'pill bad';
+          btnEl.disabled = false;
+          return;
         }
-      } catch (e) { 
-        const preview = el('pacPreview');
-        preview.textContent = 'PAC预览生成失败: ' + (e && e.message || '网络错误');
-        preview.style.display = 'block';
+        
+        const upstreamAddr = (el('upstreamAddr') && el('upstreamAddr').value || '').trim() || 'system';
+        const ret = await window.MT.invoke('capture.testUpstream', { upstream: upstreamAddr });
+        
+        if (ret && ret.ok) {
+          statusEl.textContent = '连通正常';
+          statusEl.className = 'pill ok';
+          const duration = ret.details && ret.details.duration;
+          if (duration) {
+            toast(`上游代理测试成功（${duration}ms）`);
+          } else {
+            toast('上游代理测试成功');
+          }
+        } else {
+          statusEl.textContent = '连接失败';
+          statusEl.className = 'pill bad';
+          const error = (ret && ret.error) || '未知错误';
+          toast(`上游代理测试失败: ${error}`);
+        }
+      } catch (e) {
+        const statusEl = el('upstreamStatus');
+        statusEl.textContent = '测试异常';
+        statusEl.className = 'pill bad';
+        toast('测试失败: ' + (e && e.message || '网络错误'));
+      } finally {
+        const btnEl = el('btnTestUpstream');
+        btnEl.disabled = false;
       }
     });
 
@@ -348,12 +363,25 @@
         toast('设置已应用');
       } catch { toast('应用失败'); }
     });
-    // 联动：开关控制输入框禁用
+    // 联动：开关控制输入框禁用和状态显示
     try {
       const upChk = el('enableUpstream');
       const upAddr = el('upstreamAddr');
+      const upStatus = el('upstreamStatus');
+      const upTestBtn = el('btnTestUpstream');
       if (upChk && upAddr) {
-        const sync = () => { upAddr.disabled = !upChk.checked; };
+        const sync = () => { 
+          const enabled = upChk.checked;
+          upAddr.disabled = !enabled; 
+          upTestBtn.disabled = !enabled;
+          if (!enabled && upStatus) {
+            upStatus.textContent = '已禁用';
+            upStatus.className = 'pill bad';
+          } else if (enabled && upStatus && upStatus.textContent === '已禁用') {
+            upStatus.textContent = '未测试';
+            upStatus.className = 'pill';
+          }
+        };
         upChk.addEventListener('change', sync);
         sync();
       }
@@ -389,11 +417,10 @@
       const targets = el('targets').value.trim();
       const pathPrefixes = (el('capPrefix') && el('capPrefix').value.trim()) || '';
       const rewriteRules = (el('rewriteRules') && el('rewriteRules').value) || '';
-      const mode = (el('mode') && el('mode').value) || 'global';
       const maxBodyDirMB = Number(el('maxBodyDirMB') && el('maxBodyDirMB').value) || 512;
       const enableUpstream = el('enableUpstream') ? !!el('enableUpstream').checked : true;
       const upstreamAddr = (el('upstreamAddr') && el('upstreamAddr').value) || 'system';
-      const settings = { targets, pathPrefixes, rewriteRules, mode, maxBodyDirMB, enableUpstream, upstreamAddr };
+      const settings = { targets, pathPrefixes, rewriteRules, maxBodyDirMB, enableUpstream, upstreamAddr };
       await window.MT.db.put('http-sniffer.settings', settings);
     } catch (e) { try { console.warn('[HTTP-SNIFFER] saveSettings failed', e && e.message); } catch {} }
   }
@@ -407,7 +434,6 @@
         if (val.targets != null) el('targets').value = String(val.targets || '');
         if (val.pathPrefixes != null && el('capPrefix')) el('capPrefix').value = String(val.pathPrefixes || '');
         if (val.rewriteRules != null && el('rewriteRules')) el('rewriteRules').value = String(val.rewriteRules || '');
-        if (val.mode != null && el('mode')) el('mode').value = String(val.mode || 'global');
         if (val.maxBodyDirMB != null && el('maxBodyDirMB')) el('maxBodyDirMB').value = String(val.maxBodyDirMB || '512');
         if (el('enableUpstream')) el('enableUpstream').checked = (val.enableUpstream !== false);
         if (el('upstreamAddr')) el('upstreamAddr').value = String(val.upstreamAddr || 'system');
@@ -439,7 +465,6 @@
     try {
       if (timer) clearTimeout(timer);
       // 自动清理：禁用系统代理 + 停止代理
-      try { await window.MT.invoke('capture.disablePAC'); } catch {}
       try { await window.MT.invoke('capture.disableSystemProxy'); } catch {}
       await window.MT.invoke('capture.stop');
     } catch {}
