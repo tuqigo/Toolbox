@@ -596,7 +596,18 @@ class CaptureProxyService {
     await this._notifyInternetSettingsChanged();
     
     // 验证最终状态
-    const finalState = await this.querySystemProxy();
+    let finalState = await this.querySystemProxy();
+    // 兜底：若仍为启用状态，强制关闭一次并再次验证
+    if (finalState && finalState.enable === 1) {
+      try {
+        const base = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
+        const regExe = this._getRegExePath();
+        await this._spawnCapture(regExe, ['add', base, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f']);
+      } catch {}
+      try { await this._unsetProxyViaPowerShell(); } catch {}
+      await this._notifyInternetSettingsChanged();
+      finalState = await this.querySystemProxy();
+    }
     try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] final state:', finalState); } catch {}
     
     // 额外验证：如果仍然启用且指向我们，报告警告
@@ -749,7 +760,7 @@ class CaptureProxyService {
       const exists = await fs.pathExists(this.proxyBackupFile);
       if (exists) return;
       if (!state) state = await this.querySystemProxy();
-      const original = { enable: state.enable, server: state.server, override: state.override };
+      const original = { enable: state.enable, server: state.server, override: state.override, autoConfigURL: state.autoConfigURL, autoDetect: state.autoDetect };
       const data = { original, last: null };
       await fs.writeJson(this.proxyBackupFile, data, { spaces: 2 });
       try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][backup][snapshot]', data); } catch {}
@@ -760,9 +771,15 @@ class CaptureProxyService {
     try {
       const exists = await fs.pathExists(this.proxyBackupFile);
       let data = exists ? await fs.readJson(this.proxyBackupFile) : null;
-      if (!data || !data.original) {
-        data = { original: { enable: originalState && originalState.enable, server: originalState && originalState.server, override: originalState && originalState.override, autoConfigURL: originalState && originalState.autoConfigURL, autoDetect: originalState && originalState.autoDetect }, last: null };
-      }
+      if (!data) data = { original: null, last: null };
+      // 始终以“当前真实状态”覆盖 original，避免历史遗留导致误恢复
+      data.original = {
+        enable: originalState && originalState.enable,
+        server: originalState && originalState.server,
+        override: originalState && originalState.override,
+        autoConfigURL: originalState && originalState.autoConfigURL,
+        autoDetect: originalState && originalState.autoDetect
+      };
       data.last = { setBy: 'MiniToolbox', ourServer: String(ourServer || ''), at: Date.now() };
       await fs.writeJson(this.proxyBackupFile, data, { spaces: 2 });
       try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][backup][save]', data); } catch {}
@@ -779,9 +796,11 @@ class CaptureProxyService {
       const data = await this._loadProxyBackup();
       if (!data || !data.original) return false;
       const orig = data.original;
-      const ok = await this._setProxyRegistry({ enable: orig.enable, server: orig.server, override: orig.override, autoConfigURL: orig.autoConfigURL, autoDetect: orig.autoDetect });
+      // 先恢复开关，再恢复其它键，避免写入 server 时隐式开启
+      const okEnable = await this._setProxyRegistry({ enable: orig.enable });
+      const okRest = await this._setProxyRegistry({ server: orig.server, override: orig.override, autoConfigURL: orig.autoConfigURL, autoDetect: orig.autoDetect });
       await this._notifyInternetSettingsChanged();
-      return ok;
+      return !!(okEnable && okRest);
     } catch { return false; }
   }
 
@@ -1347,7 +1366,7 @@ class CaptureProxyService {
     return `'${str.replace(/'/g, "'\\''")}'`;
   }
 
-  async replay({ id, overrides, insecure = false, followRedirects = true, timeoutMs = 20000 } = {}) {
+  async replay({ id, overrides, insecure = false, followRedirects = true, timeoutMs = 20000, via = 'direct' } = {}) {
     const rec = this.getRecordById(id);
     if (!rec) return { ok: false, error: 'not found' };
     let urlStr = this._buildUrl(rec, overrides && overrides.url);
@@ -1378,6 +1397,18 @@ class CaptureProxyService {
           rejectUnauthorized: !insecure,
           timeout: Math.max(1, Number(timeoutMs || 20000))
         };
+        // 走上游：根据协议注入对应 agent
+        if (String(via) === 'upstream') {
+          try {
+            let agent = null;
+            if (isHttps) {
+              agent = this._httpsUpstreamAgent || this._httpUpstreamAgent || null;
+            } else {
+              agent = this._httpUpstreamAgent || this._httpsUpstreamAgent || null;
+            }
+            if (agent) options.agent = agent;
+          } catch {}
+        }
         // content-length
         if (curBody && curBody.length > 0) {
           options.headers['Content-Length'] = Buffer.byteLength(curBody);
@@ -1494,7 +1525,11 @@ class CaptureProxyService {
           let orig = null;
           try { const backup = await this._loadProxyBackup(); orig = backup && backup.original; } catch {}
           const st = await this.querySystemProxy();
-          const server = (orig && orig.server) || (st && st.server) || '';
+          const eff = orig || st || null;
+          if (!eff || eff.enable !== 1) {
+            return { ok: false, error: '系统代理未启用' };
+          }
+          const server = (eff && eff.server) || '';
           if (!server) {
             return { ok: false, error: '系统未配置代理' };
           }
@@ -1671,11 +1706,16 @@ class CaptureProxyService {
         let orig = null;
         try { const backup = await this._loadProxyBackup(); orig = backup && backup.original; } catch {}
         const st = await this.querySystemProxy();
-        const server = (orig && orig.server) || (st && st.server) || '';
-      // 强制链式：不继承系统 ProxyOverride，避免在家庭网络下被大范围绕过，但保留内网地址绕过
-      const override = '<local>;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*;169.254.*';
-      const parsed = this._parseWinProxyServer(server);
-      httpUrl = parsed.http; httpsUrl = parsed.https; bypassRaw = override || '';
+        const eff = orig || st || null;
+        if (!eff || eff.enable !== 1) {
+          try { if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM] system proxy disabled, skip upstream'); } catch {}
+          return; // 系统代理未启用：不设置上游
+        }
+        const server = (eff && eff.server) || '';
+        // 强制链式：不继承系统 ProxyOverride，避免在家庭网络下被大范围绕过，但保留内网地址绕过
+        const override = '<local>;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*;169.254.*';
+        const parsed = this._parseWinProxyServer(server);
+        httpUrl = parsed.http; httpsUrl = parsed.https; bypassRaw = override || '';
         if (parsed.socks && String(parsed.socks).trim()) {
           const socksAddr = String(parsed.socks).trim();
           httpUrl = `socks5://${socksAddr}`;

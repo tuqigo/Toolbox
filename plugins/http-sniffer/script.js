@@ -252,7 +252,9 @@
     el('btnReplay').addEventListener('click', async ()=>{
       try {
         if (!selectedId) { toast('请先选择一条请求'); return; }
-        const r = await window.MT.invoke('capture.replay', { id: selectedId, followRedirects: true });
+        const viaSel = document.getElementById('replayRoute');
+        const via = viaSel ? (viaSel.value || 'direct') : 'direct';
+        const r = await window.MT.invoke('capture.replay', { id: selectedId, followRedirects: true, via });
         const data = (r && r.data) ? r.data : r; // invoke 会在 ok=true 时直接返回 data
         if (data && (data.status !== undefined)) {
           const h = JSON.stringify(data.headers||{}, null, 2);

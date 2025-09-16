@@ -159,6 +159,10 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4h18v2H3V4zm0 7h18v2H3v-2zm0 7h18v2H3v-2z"/></svg>
           <span class="btn-text">复制cURL(PS)</span>
         </button>
+        <select id="replayRoute" class="select" title="重放路由" style="height:30px;">
+          <option value="direct">直连</option>
+          <option value="upstream">上游</option>
+        </select>
         <button id="btnReplay" class="btn" title="重放请求">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5v4l4-4-4-4v4C7.58 5 4 8.58 4 13s3.58 8 8 8 8-3.58 8-8h-2c0 3.31-2.69 6-6 6s-6-2.69-6-6 2.69-6 6-6z"/></svg>
           <span class="btn-text">重放</span>
