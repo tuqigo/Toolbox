@@ -30,7 +30,13 @@ async function __loadProxyClass(isQuiet) {
 class CaptureProxyService {
   constructor(options = {}) {
     this.isQuiet = !!options.isQuiet;
-    this.baseDir = options.baseDir || path.join((options.getDataDir && options.getDataDir()) || (process.env.APPDATA || os.homedir()), 'MiniToolbox', 'data');
+    // 修复：若传入 getDataDir()（已含 data），不再重复拼接 MiniToolbox/data
+    try {
+      const fromGetter = options.getDataDir && options.getDataDir();
+      this.baseDir = options.baseDir || (fromGetter ? fromGetter : path.join((process.env.APPDATA || os.homedir()), 'MiniToolbox', 'data'));
+    } catch {
+      this.baseDir = options.baseDir || path.join((process.env.APPDATA || os.homedir()), 'MiniToolbox', 'data');
+    }
     this.captureDir = path.join(this.baseDir, 'capture');
     this.caDir = path.join(this.captureDir, 'ca');
     this.maxEntries = 1000;
@@ -157,6 +163,14 @@ class CaptureProxyService {
               if (!this.isQuiet) console.log('[CAPTURE][CHAIN][bypass] client->MITM->DIRECT host=%s path=%s id=%s', host, path, (ctx.__mtId||''));
             } catch {}
           }
+        }
+        // 日志：存在上游但处于熔断窗口，跳过使用
+        else if ((this._httpUpstreamAgent || this._httpsUpstreamAgent) && this._upstreamDisabledUntil && now < this._upstreamDisabledUntil) {
+          try {
+            const until = new Date(this._upstreamDisabledUntil).toISOString();
+            const host = this._getHost(ctx) || '';
+            if (!this.isQuiet) console.log('[CAPTURE][CHAIN][skip] upstream temporarily disabled until %s host=%s', until, host);
+          } catch {}
         }
       } catch {}
       // 改写/阻断/Mock：优先处理
@@ -331,7 +345,7 @@ class CaptureProxyService {
           this.host = host;
           this.active = true;
           this.startedAt = Date.now();
-          if (!this.isQuiet) console.log('[CAPTURE] proxy started', `${host}:${this.port}`, 'caDir=', this.caDir);
+          if (!this.isQuiet) console.log('[CAPTURE] proxy started', `${host}:${this.port}`, 'baseDir=', this.baseDir, 'caDir=', this.caDir);
           // 端口可能改变，启动后再根据实际端口重置自连保护与上游代理
           try { this._ourServer = `${this.host}:${this.port}`; } catch {}
           try { this._prepareUpstream(opts.upstream); } catch {}
@@ -635,6 +649,9 @@ class CaptureProxyService {
     await this._ensureCaGenerated();
     if (process.platform === 'win32') {
       // 优先尝试当前用户根存储，其次尝试本机根存储（需要管理员权限）
+      // 先卸载旧的同名 CA，避免存在过期/旧指纹的冲突
+      try { await this._runCertutil(['-user', '-delstore', 'Root', 'NodeMITMProxyCA']); } catch {}
+      try { await this._runCertutil(['-delstore', 'Root', 'NodeMITMProxyCA']); } catch {}
       const okUser = await this._runCertutil(['-user', '-addstore', 'Root', caPem]);
       if (okUser) {
         try { if (!this.isQuiet) console.log('[CAPTURE][CERT][install] user Root => OK'); } catch {}
@@ -661,7 +678,10 @@ class CaptureProxyService {
           // 归一化输出，只保留十六进制字符
           const normalized = out.replace(/[^0-9A-F]/gi, '').toUpperCase();
           if (normalized.includes(fp)) return true;
+          // 指纹不匹配则视为未安装（避免误判已安装旧版 CA）
+          return false;
         }
+        // 无法获取指纹时，降级按主题名粗略匹配
         return /Node\s*MITM\s*Proxy\s*CA|NodeMITMProxyCA/i.test(out);
       };
       const userOk = await checkByCertutil(['-user', '-store', 'Root']);
@@ -840,8 +860,11 @@ class CaptureProxyService {
       // certutil -user -delstore "Root" <SerialNumber or SHA1> 无法直接用文件
       // 简化：尝试从根存储删除 CN=NodeMITMProxyCA（可能会有多个副本）
       const name = 'NodeMITMProxyCA';
-      const okUser = await this._runCertutil(['-user', '-delstore', 'Root', name]);
-      const okMachine = await this._runCertutil(['-delstore', 'Root', name]);
+      let okUser = await this._runCertutil(['-user', '-delstore', 'Root', name]);
+      let okMachine = await this._runCertutil(['-delstore', 'Root', name]);
+      // 额外清理：可能存在新的 Issuer 名称（不同版本库有差异）
+      if (!okUser) okUser = await this._runCertutil(['-user', '-delstore', 'Root', 'Node MITM Proxy CA']);
+      if (!okMachine) okMachine = await this._runCertutil(['-delstore', 'Root', 'Node MITM Proxy CA']);
       try { if (!this.isQuiet) console.log('[CAPTURE][CERT][uninstall]', { okUser, okMachine }); } catch {}
       return { ok: !!(okUser || okMachine) };
     }
