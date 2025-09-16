@@ -184,6 +184,11 @@
         <label>上游地址</label>
         <div style="display: flex; gap: 8px; align-items: center;">
           <input id="upstreamAddr" type="text" class="input" placeholder="system / http://127.0.0.1:7890 / socks5://127.0.0.1:10808" value="system" style="flex: 1"/>
+          <select id="testUrlSelect" class="select" title="选择测试端点">
+            <option value="https://www.google.com/generate_204">Google (国际)</option>
+            <option value="https://www.googleapis.com/generate_204">Google APIs</option>
+            <option value="https://www.baidu.com/">百度 (国内)</option>
+          </select>
           <button id="btnTestUpstream" class="btn" title="测试上游连通性">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
             <span class="btn-text">测试</span>

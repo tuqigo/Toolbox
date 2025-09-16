@@ -136,21 +136,10 @@ class CaptureProxyService {
             ctx.proxyToServerRequestOptions = ctx.proxyToServerRequestOptions || {};
             ctx.proxyToServerRequestOptions.agent = ctx.isSSL ? (this._httpsUpstreamAgent || this._httpUpstreamAgent) : (this._httpUpstreamAgent || this._httpsUpstreamAgent);
             ctx.__mtUsedUpstream = true;
-            try {
-              const req = ctx && ctx.clientToProxyRequest;
-              const urlRaw = req && req.url || '/';
-              const path = (()=>{ try { return new URL(urlRaw, (ctx.isSSL?'https://':'http://') + host).pathname + (new URL(urlRaw, 'http://x').search||''); } catch { return urlRaw; } })();
-              const u = ctx.isSSL ? (this._upstreamHttpsUrl || this._upstreamHttpUrl) : (this._upstreamHttpUrl || this._upstreamHttpsUrl);
-              if (!this.isQuiet) console.log('[CAPTURE][CHAIN][use] client->MITM->UPSTREAM(%s)->TARGET host=%s path=%s id=%s', u || 'unknown', host, path, (ctx.__mtId||''));
-            } catch {}
+            // 已使用上游代理（日志已简化）
           } else {
             ctx.__mtUsedUpstream = false;
-            try {
-              const req = ctx && ctx.clientToProxyRequest;
-              const urlRaw = req && req.url || '/';
-              const path = (()=>{ try { return new URL(urlRaw, (ctx.isSSL?'https://':'http://') + host).pathname + (new URL(urlRaw, 'http://x').search||''); } catch { return urlRaw; } })();
-              if (!this.isQuiet) console.log('[CAPTURE][CHAIN][bypass] client->MITM->DIRECT host=%s path=%s id=%s', host, path, (ctx.__mtId||''));
-            } catch {}
+            // 已绕过上游代理（日志已简化）
           }
         }
       } catch {}
@@ -297,10 +286,7 @@ class CaptureProxyService {
         rec.duration = Math.max(0, rec.tsEnd - (ctx.__mtStart || rec.tsStart));
         // 组装 body
         await this._finalizeBodies(rec, ctx.__mtReqChunks, ctx.__mtRespChunks);
-        try {
-          const used = ctx.__mtUsedUpstream ? (ctx && ctx.isSSL ? (this._upstreamHttpsUrl || this._upstreamHttpUrl) : (this._upstreamHttpUrl || this._upstreamHttpsUrl)) : 'DIRECT';
-          if (!this.isQuiet) console.log('[CAPTURE][CHAIN][done] id=%s status=%s upstream=%s host=%s path=%s', rec.id, rec.status, used, rec.host, rec.path);
-        } catch {}
+        // 请求完成（日志已简化）
       } catch (e) {
         try { if (!this.isQuiet) console.warn('[CAPTURE][finalizeBodies][err]', e && e.message); } catch {}
       } finally {
@@ -339,24 +325,61 @@ class CaptureProxyService {
   }
 
   async stop() {
-    if (!this.active) return { ok: true };
+    try { if (!this.isQuiet) console.log('[CAPTURE][STOP] stopping proxy service...'); } catch {}
+    
+    if (!this.active) {
+      try { if (!this.isQuiet) console.log('[CAPTURE][STOP] service already stopped'); } catch {}
+      return { ok: true };
+    }
+    
     try {
       this.proxy && this.proxy.close();
     } catch {}
+    
     this.active = false;
     this.port = null;
     this.startedAt = null;
+    
     // 恢复 console.debug
     this._restoreMitmDebug();
-    // 额外保护：若系统代理仍指向我们，尝试恢复备份
+    
+    // 强制尝试恢复系统代理（无论当前状态如何）
     try {
       const st = await this.querySystemProxy();
       const our = this._ourServer;
+      
+      if (!this.isQuiet) console.log('[CAPTURE][STOP] current proxy state:', {
+        enabled: st && st.enable, 
+        server: st && st.server, 
+        ourServer: our
+      });
+      
+      // 如果系统代理指向我们，或者有备份存在，都尝试恢复
+      let shouldRestore = false;
       if (st && st.enable === 1 && our && st.server === our) {
-        await this._restoreProxyBackup();
-        await this._notifyInternetSettingsChanged();
+        shouldRestore = true;
+        if (!this.isQuiet) console.log('[CAPTURE][STOP] system proxy points to us, restoring...');
+      } else {
+        // 检查是否有备份文件，有的话也尝试恢复
+        const backup = await this._loadProxyBackup();
+        if (backup && backup.last && backup.last.setBy === 'MiniToolbox') {
+          shouldRestore = true;
+          if (!this.isQuiet) console.log('[CAPTURE][STOP] found backup from us, restoring...');
+        }
       }
-    } catch {}
+      
+      if (shouldRestore) {
+        const restored = await this._restoreProxyBackup();
+        await this._notifyInternetSettingsChanged();
+        if (!this.isQuiet) console.log('[CAPTURE][STOP] proxy backup restored:', restored);
+      } else {
+        if (!this.isQuiet) console.log('[CAPTURE][STOP] no restore needed');
+      }
+    } catch (e) {
+      if (!this.isQuiet) console.error('[CAPTURE][STOP] failed to restore proxy:', e.message);
+    }
+    
+    try { if (!this.isQuiet) console.log('[CAPTURE][STOP] proxy service stopped successfully'); } catch {}
     return { ok: true };
   }
 
@@ -530,24 +553,59 @@ class CaptureProxyService {
 
   async disableSystemProxy() {
     if (process.platform !== 'win32') return { ok: false, error: 'only supported on windows' };
+    
+    try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] starting system proxy restore...'); } catch {}
+    
+    // 检查当前状态
+    const currentState = await this.querySystemProxy();
+    if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] current state:', {
+      enabled: currentState && currentState.enable,
+      server: currentState && currentState.server
+    });
+    
     const base = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
-    try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable]'); } catch {}
     const regExe = this._getRegExePath();
+    
     // 优先尝试恢复备份
+    try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] attempting backup restore...'); } catch {}
     let ok = await this._restoreProxyBackup();
-    if (!ok) {
+    
+    if (ok) {
+      try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] backup restored successfully'); } catch {}
+    } else {
+      try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] backup restore failed, using fallback...'); } catch {}
+      
+      // 兜底：直接禁用代理
       let r = await this._spawnCapture(regExe, ['add', base, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f']);
       ok = r && r.code === 0;
-      try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][reg]', regExe, 'add ProxyEnable=0 => code=', r && r.code, 'stdout=', (r && r.stdout||'').trim(), 'stderr=', (r && r.stderr||'').trim()); } catch {}
+      try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][reg] ProxyEnable=0 => code=', r && r.code, 'stdout=', (r && r.stdout||'').trim(), 'stderr=', (r && r.stderr||'').trim()); } catch {}
+      
       if (!ok) {
+        try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] registry method failed, trying PowerShell...'); } catch {}
         const psOk = await this._unsetProxyViaPowerShell();
         ok = psOk;
+        if (psOk) {
+          try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] PowerShell method succeeded'); } catch {}
+        } else {
+          try { if (!this.isQuiet) console.error('[CAPTURE][SYS-PROXY][disable] all methods failed'); } catch {}
+        }
       }
     }
+    
+    // 通知系统设置变更
     await this._notifyInternetSettingsChanged();
-    const state = await this.querySystemProxy();
-    try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable][state]', state); } catch {}
-    return { ok, state };
+    
+    // 验证最终状态
+    const finalState = await this.querySystemProxy();
+    try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] final state:', finalState); } catch {}
+    
+    // 额外验证：如果仍然启用且指向我们，报告警告
+    const our = this._ourServer;
+    if (finalState && finalState.enable === 1 && our && finalState.server === our) {
+      try { console.warn('[CAPTURE][SYS-PROXY][disable] WARNING: system proxy still points to us after disable attempt'); } catch {}
+    }
+    
+    return { ok, state: finalState };
   }
 
   // 安装根证书（当前用户）
@@ -1422,12 +1480,55 @@ class CaptureProxyService {
   }
 
   // ---------- 手动测试上游连通性 ----------
-  async testUpstreamConnectivity({ upstream = null } = {}) {
+  async testUpstreamConnectivity({ upstream = null, testUrl = null } = {}) {
     try {
       // 如果没有指定upstream，使用当前配置的
       let testUpstream = upstream;
       if (!testUpstream) {
         testUpstream = this._upstreamHttpUrl || this._upstreamHttpsUrl;
+      }
+      
+      // 如果是 "system"，解析实际的系统代理
+      if (testUpstream === 'system' || !testUpstream) {
+        try {
+          let orig = null;
+          try { const backup = await this._loadProxyBackup(); orig = backup && backup.original; } catch {}
+          const st = await this.querySystemProxy();
+          const server = (orig && orig.server) || (st && st.server) || '';
+          if (!server) {
+            return { ok: false, error: '系统未配置代理' };
+          }
+          const parsed = this._parseWinProxyServer(server);
+          testUpstream = parsed.http || parsed.https;
+          if (parsed.socks && String(parsed.socks).trim()) {
+            testUpstream = `socks5://${parsed.socks}`;
+          } else if (testUpstream && !/^(https?|socks)/i.test(testUpstream)) {
+            // 确保有协议前缀
+            testUpstream = `http://${testUpstream}`;
+          }
+          if (!testUpstream) {
+            return { ok: false, error: '无法解析系统代理配置' };
+          }
+        } catch (e) {
+          return { ok: false, error: '系统代理解析失败: ' + (e.message || '未知错误') };
+        }
+      }
+      
+      // 确保非system代理地址有协议前缀
+      if (testUpstream && testUpstream !== 'system') {
+        if (!/^(https?|socks)/i.test(testUpstream)) {
+          // 根据端口号推断协议类型
+          if (/:\d+$/.test(testUpstream)) {
+            const port = parseInt(testUpstream.split(':').pop(), 10);
+            if (port === 1080 || port === 10808 || port === 1086) {
+              testUpstream = `socks5://${testUpstream}`;
+            } else {
+              testUpstream = `http://${testUpstream}`;
+            }
+          } else {
+            testUpstream = `http://${testUpstream}`;
+          }
+        }
       }
       
       if (!testUpstream) {
@@ -1437,17 +1538,27 @@ class CaptureProxyService {
       const startTime = Date.now();
       
       // 基础TCP连接测试
+      if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][test] starting test for:', testUpstream);
       const tcpOk = await this._basicTcpProbe(testUpstream);
       if (!tcpOk) {
         return { 
           ok: false, 
           error: 'TCP连接失败',
-          details: { tcp: false, http: false, duration: Date.now() - startTime }
+          details: { tcp: false, http: false, duration: Date.now() - startTime, upstream: testUpstream }
         };
       }
 
       // 功能性HTTP测试
-      const httpOk = await this._functionalProxyTest(testUpstream);
+      let httpOk;
+      if (testUrl) {
+        // 如果指定了测试URL，直接测试该URL
+        if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][test] using specified test URL:', testUrl);
+        httpOk = await this._testSingleUrl(testUpstream, testUrl);
+      } else {
+        // 没有指定URL时，不进行HTTP测试，只进行TCP测试
+        if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][test] no test URL specified, skipping HTTP test');
+        httpOk = true; // TCP连接成功就认为代理可用
+      }
       const duration = Date.now() - startTime;
       
       if (httpOk) {
@@ -1678,7 +1789,7 @@ class CaptureProxyService {
       } else if (/^https:/i.test(proxyUrl)) {
         if (!__HttpsProxyAgentClass) {
           const mod = require('https-proxy-agent');
-          __HttpsProxyAgentClass = (mod && (mod.HttpsProxyAgentClass || mod.default)) || mod;
+          __HttpsProxyAgentClass = (mod && (mod.HttpsProxyAgent || mod.default)) || mod;
         }
         Agent = __HttpsProxyAgentClass;
       } else {
@@ -1692,48 +1803,107 @@ class CaptureProxyService {
       if (!Agent) return false;
       
       const agent = new Agent(proxyUrl);
-      const testUrls = [
-        'http://www.google.com/generate_204',  // Google 连通性测试
-        'http://connectivitycheck.gstatic.com/generate_204', // Google 备用
-        'http://httpbin.org/get', // 备用测试服务
-      ];
+      // 内置测试URL已移除，现在由UI层控制测试端点
+      const testUrls = []; // 空数组，不再使用内置URL
       
-      for (const testUrl of testUrls) {
-        try {
-          const result = await this._makeTestRequest(testUrl, agent);
-          if (result) {
-            try { if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][probe] functional test OK via', testUrl); } catch {}
-            return true;
-          }
-        } catch (e) {
-          try { if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][probe] test failed for', testUrl, e.message); } catch {}
-        }
-      }
+      // 内置测试URL已移除，现在需要通过UI层指定测试URL
+      if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][probe] ✗ no built-in test URLs, use UI selection:', proxyUrl);
       return false;
     } catch { return false; }
+  }
+
+  async _testSingleUrl(proxyUrl, testUrl) {
+    try {
+      // 动态加载代理agent
+      let Agent = null;
+      if (/^socks/i.test(proxyUrl)) {
+        if (!__SocksProxyAgentClass) {
+          const mod = require('socks-proxy-agent');
+          __SocksProxyAgentClass = (mod && (mod.SocksProxyAgent || mod.default)) || mod;
+        }
+        Agent = __SocksProxyAgentClass;
+      } else if (/^https:/i.test(proxyUrl)) {
+        if (!__HttpsProxyAgentClass) {
+          const mod = require('https-proxy-agent');
+          __HttpsProxyAgentClass = (mod && (mod.HttpsProxyAgent || mod.default)) || mod;
+        }
+        Agent = __HttpsProxyAgentClass;
+      } else {
+        if (!__HttpProxyAgentClass) {
+          const mod = require('http-proxy-agent');
+          __HttpProxyAgentClass = (mod && (mod.HttpProxyAgent || mod.default)) || mod;
+        }
+        Agent = __HttpProxyAgentClass;
+      }
+      
+      if (!Agent) return false;
+      
+      const agent = new Agent(proxyUrl);
+      if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][test] testing single URL:', testUrl, 'via proxy:', proxyUrl);
+      
+      const result = await this._makeTestRequest(testUrl, agent);
+      if (result) {
+        if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][test] ✓ single URL test SUCCESS:', testUrl);
+        return true;
+      } else {
+        if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][test] ✗ single URL test FAILED:', testUrl);
+        return false;
+      }
+    } catch (e) {
+      if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][test] ✗ single URL test exception:', testUrl, e.message);
+      return false;
+    }
   }
 
   async _makeTestRequest(url, agent) {
     return new Promise((resolve) => {
       try {
-        const http = require('http');
-        const options = new URL(url);
-        options.agent = agent;
-        options.timeout = 3000;
-        options.method = 'HEAD'; // 使用HEAD减少流量
+        const urlObj = new URL(url);
+        const isHttps = urlObj.protocol === 'https:';
+        const httpModule = isHttps ? require('https') : require('http');
         
-        const req = http.request(options, (res) => {
+        const options = {
+          hostname: urlObj.hostname,
+          port: urlObj.port || (isHttps ? 443 : 80),
+          path: urlObj.pathname + (urlObj.search || ''),
+          method: 'HEAD', // 使用HEAD减少流量，generate_204专门支持HEAD
+          agent: agent,
+          timeout: 8000, // 增加超时时间
+          rejectUnauthorized: false, // 忽略SSL证书错误，测试代理连通性
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': '*/*',
+            'Connection': 'close'
+          }
+        };
+        
+        const req = httpModule.request(options, (res) => {
           try {
-            // 200-299 或者 204 (No Content) 都认为是成功
-            const success = (res.statusCode >= 200 && res.statusCode < 300) || res.statusCode === 204;
+            // 任何2xx和3xx状态码都认为是成功（包括200,204,301,302等）
+            const success = res.statusCode >= 200 && res.statusCode < 400;
+            if (!this.isQuiet) {
+              console.log('[CAPTURE][UPSTREAM][test]', success ? 'success' : 'failed', ':', url, 'status:', res.statusCode);
+            }
             resolve(success);
           } catch { resolve(false); }
         });
         
-        req.on('timeout', () => { try { req.destroy(); } catch {}; resolve(false); });
-        req.on('error', () => resolve(false));
+        req.on('timeout', () => { 
+          try { req.destroy(); } catch {}; 
+          if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][test] timeout:', url);
+          resolve(false); 
+        });
+        
+        req.on('error', (err) => {
+          if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][test] error:', url, err.code || err.message);
+          resolve(false);
+        });
+        
         req.end();
-      } catch { resolve(false); }
+      } catch (e) { 
+        if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM][test] exception:', url, e.message);
+        resolve(false); 
+      }
     });
   }
 

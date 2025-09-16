@@ -194,12 +194,22 @@
   }
 
   async function stop(){
-    await window.MT.invoke('capture.stop');
-    // 禁用系统代理
-    try { await window.MT.invoke('capture.disableSystemProxy'); } catch {}
-    try { console.info('[HTTP-SNIFFER] stop: proxy stopped and system proxy disabled'); } catch {}
+    try { console.info('[HTTP-SNIFFER] stop: starting graceful shutdown...'); } catch {}
+    // 先禁用系统代理，再停止代理服务（重要：顺序不能颠倒）
+    try { 
+      await window.MT.invoke('capture.disableSystemProxy'); 
+      try { console.info('[HTTP-SNIFFER] stop: system proxy disabled'); } catch {}
+    } catch (e) { 
+      try { console.error('[HTTP-SNIFFER] stop: failed to disable system proxy:', e.message); } catch {}
+    }
+    try {
+      await window.MT.invoke('capture.stop');
+      try { console.info('[HTTP-SNIFFER] stop: proxy service stopped'); } catch {}
+    } catch (e) {
+      try { console.error('[HTTP-SNIFFER] stop: failed to stop proxy service:', e.message); } catch {}
+    }
     await updateStatus();
-    toast('已关闭（已停止代理并禁用系统代理）');
+    toast('已关闭（已停止代理并恢复系统代理）');
   }
 
   async function clearAll(){
@@ -302,23 +312,58 @@
           return;
         }
         
-        const upstreamAddr = (el('upstreamAddr') && el('upstreamAddr').value || '').trim() || 'system';
-        const ret = await window.MT.invoke('capture.testUpstream', { upstream: upstreamAddr });
+        let upstreamAddr = (el('upstreamAddr') && el('upstreamAddr').value || '').trim() || 'system';
+        // 如果是填入的 127.0.0.1:10808 这样的地址，根据端口推断协议
+        if (upstreamAddr !== 'system' && !/^(https?|socks)/i.test(upstreamAddr)) {
+          if (/:\d+$/.test(upstreamAddr)) {
+            const port = parseInt(upstreamAddr.split(':').pop(), 10);
+            if (port === 1080 || port === 10808 || port === 1086) {
+              upstreamAddr = `socks5://${upstreamAddr}`;
+            }
+          }
+        }
+        
+        // 获取用户选择的测试URL
+        const selectedTestUrl = (el('testUrlSelect') && el('testUrlSelect').value) || 'https://www.google.com/generate_204';
+        const urlLabel = el('testUrlSelect') ? (el('testUrlSelect').selectedOptions[0] ? el('testUrlSelect').selectedOptions[0].text : '默认端点') : '默认端点';
+        
+        // 显示正在测试的信息
+        toast(`正在测试代理连通性...\n测试端点: ${urlLabel}\n测试地址: ${selectedTestUrl}`);
+        
+        // 使用用户选择的测试端点
+        const ret = await window.MT.invoke('capture.testUpstream', { 
+          upstream: upstreamAddr,
+          testUrl: selectedTestUrl
+        });
+        
+        // 添加调试日志
+        try { console.log('[HTTP-SNIFFER] test result:', JSON.stringify(ret, null, 2)); } catch {}
         
         if (ret && ret.ok) {
           statusEl.textContent = '连通正常';
           statusEl.className = 'pill ok';
           const duration = ret.details && ret.details.duration;
-          if (duration) {
-            toast(`上游代理测试成功（${duration}ms）`);
+          const upstream = ret.details && ret.details.upstream;
+          if (duration && upstream) {
+            toast(`✓ 连通性测试成功！\n响应时间: ${duration}ms\n代理地址: ${upstream}\n测试端点: ${urlLabel}`);
+          } else if (duration) {
+            toast(`✓ 连通性测试成功！\n响应时间: ${duration}ms\n测试端点: ${urlLabel}`);
           } else {
-            toast('上游代理测试成功');
+            toast(`✓ 连通性测试成功！\n测试端点: ${urlLabel}`);
           }
         } else {
           statusEl.textContent = '连接失败';
           statusEl.className = 'pill bad';
           const error = (ret && ret.error) || '未知错误';
-          toast(`上游代理测试失败: ${error}`);
+          const details = ret && ret.details;
+          let detailMsg = '';
+          if (details) {
+            const upstream = details.upstream;
+            if (upstream) detailMsg += `\n代理地址: ${upstream}`;
+            if (details.tcp === false) detailMsg += '\n失败原因: TCP连接失败';
+            else if (details.http === false) detailMsg += '\n失败原因: HTTPS请求失败';
+          }
+          toast(`✗ 连通性测试失败\n错误: ${error}${detailMsg}\n测试端点: ${urlLabel}`);
         }
       } catch (e) {
         const statusEl = el('upstreamStatus');
@@ -356,12 +401,29 @@
     if (btnSettingsClose) btnSettingsClose.addEventListener('click', ()=>{ if (panel) panel.style.display = 'none'; });
     if (btnSettingsApply) btnSettingsApply.addEventListener('click', async ()=>{
       try {
+        try { console.info('[HTTP-SNIFFER] settings apply: saving and restarting...'); } catch {}
         await saveSettings();
-        await stop();
+        
+        // 先确保完全停止并恢复代理
+        try {
+          await window.MT.invoke('capture.disableSystemProxy');
+          await window.MT.invoke('capture.stop');
+          try { console.info('[HTTP-SNIFFER] settings apply: stopped previous instance'); } catch {}
+        } catch (e) {
+          try { console.error('[HTTP-SNIFFER] settings apply: stop failed:', e.message); } catch {}
+        }
+        
+        // 等待一小段时间确保清理完成
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // 重新启动
         await start();
         if (panel) panel.style.display = 'none';
-        toast('设置已应用');
-      } catch { toast('应用失败'); }
+        toast('设置已应用并重启');
+      } catch (e) { 
+        try { console.error('[HTTP-SNIFFER] settings apply failed:', e.message); } catch {}
+        toast('应用失败: ' + (e.message || '未知错误')); 
+      }
     });
     // 联动：开关控制输入框禁用和状态显示
     try {
@@ -369,11 +431,15 @@
       const upAddr = el('upstreamAddr');
       const upStatus = el('upstreamStatus');
       const upTestBtn = el('btnTestUpstream');
+      const testUrlSelect = el('testUrlSelect');
+      
       if (upChk && upAddr) {
         const sync = () => { 
           const enabled = upChk.checked;
           upAddr.disabled = !enabled; 
           upTestBtn.disabled = !enabled;
+          if (testUrlSelect) testUrlSelect.disabled = !enabled;
+          
           if (!enabled && upStatus) {
             upStatus.textContent = '已禁用';
             upStatus.className = 'pill bad';
@@ -385,6 +451,17 @@
         upChk.addEventListener('change', sync);
         sync();
       }
+      
+      // 监听代理地址和测试URL变化，重置测试状态
+      const resetTestStatus = () => {
+        if (upStatus && upStatus.textContent !== '已禁用' && upStatus.textContent !== '测试中...') {
+          upStatus.textContent = '未测试';
+          upStatus.className = 'pill';
+        }
+      };
+      
+      if (upAddr) upAddr.addEventListener('input', resetTestStatus);
+      if (testUrlSelect) testUrlSelect.addEventListener('change', resetTestStatus);
     } catch {}
     
     // 点击外部隐藏设置面板
@@ -461,12 +538,36 @@
     loop();
   });
 
-  window.addEventListener('beforeunload', async ()=>{
+  // 页面卸载时的清理（同步执行，不能使用async）
+  window.addEventListener('beforeunload', (event) => {
     try {
       if (timer) clearTimeout(timer);
-      // 自动清理：禁用系统代理 + 停止代理
-      try { await window.MT.invoke('capture.disableSystemProxy'); } catch {}
-      await window.MT.invoke('capture.stop');
+      try { console.info('[HTTP-SNIFFER] beforeunload: starting emergency cleanup...'); } catch {}
+      // 注意：beforeunload不支持async，但我们尝试同步调用
+      // 为了更可靠的清理，我们在多个地方都添加了保护
+      try {
+        // 使用同步的方式尝试清理（虽然invoke本身是异步的）
+        window.MT.invoke('capture.disableSystemProxy');
+        window.MT.invoke('capture.stop');
+      } catch {}
+    } catch {}
+  });
+  
+  // 添加额外的页面隐藏事件监听（更可靠）
+  window.addEventListener('pagehide', (event) => {
+    try {
+      try { console.info('[HTTP-SNIFFER] pagehide: cleanup triggered'); } catch {}
+      window.MT.invoke('capture.disableSystemProxy');
+      window.MT.invoke('capture.stop');
+    } catch {}
+  });
+  
+  // 添加窗口关闭前的确认和清理
+  window.addEventListener('unload', (event) => {
+    try {
+      try { console.info('[HTTP-SNIFFER] unload: final cleanup attempt'); } catch {}
+      window.MT.invoke('capture.disableSystemProxy');
+      window.MT.invoke('capture.stop');
     } catch {}
   });
 })();

@@ -2003,15 +2003,58 @@ class MiniToolbox {
       try {
         // 尽量保证还原系统代理
         event.preventDefault();
+        console.log('[MAIN][QUIT] starting graceful shutdown...');
+        
         this.stopClipboardMonitoring();
         globalShortcut.unregisterAll();
-        try { if (this.captureProxy && this.captureProxy.disableSystemProxy) await this.captureProxy.disableSystemProxy(); } catch {}
-        try { if (this.captureProxy && this.captureProxy.stop) await this.captureProxy.stop(); } catch {}
+        
+        // 代理清理：先禁用系统代理，再停止服务
+        try { 
+          if (this.captureProxy && this.captureProxy.disableSystemProxy) {
+            console.log('[MAIN][QUIT] disabling system proxy...');
+            await this.captureProxy.disableSystemProxy(); 
+            console.log('[MAIN][QUIT] system proxy disabled');
+          }
+        } catch (e) { 
+          console.error('[MAIN][QUIT] failed to disable system proxy:', e.message); 
+        }
+        
+        try { 
+          if (this.captureProxy && this.captureProxy.stop) {
+            console.log('[MAIN][QUIT] stopping capture proxy...');
+            await this.captureProxy.stop(); 
+            console.log('[MAIN][QUIT] capture proxy stopped');
+          }
+        } catch (e) { 
+          console.error('[MAIN][QUIT] failed to stop capture proxy:', e.message); 
+        }
+        
         try { if (this.tray) { this.tray.destroy(); this.tray = null; } } catch {}
+        
+        console.log('[MAIN][QUIT] graceful shutdown completed');
       } finally {
         // 无论成功与否，确保进程退出
         app.exit(0);
       }
+    });
+    
+    // 添加额外的退出信号处理
+    process.on('SIGINT', async () => {
+      console.log('[MAIN][SIGINT] received, cleaning up...');
+      try {
+        if (this.captureProxy && this.captureProxy.disableSystemProxy) await this.captureProxy.disableSystemProxy();
+        if (this.captureProxy && this.captureProxy.stop) await this.captureProxy.stop();
+      } catch {}
+      process.exit(0);
+    });
+    
+    process.on('SIGTERM', async () => {
+      console.log('[MAIN][SIGTERM] received, cleaning up...');
+      try {
+        if (this.captureProxy && this.captureProxy.disableSystemProxy) await this.captureProxy.disableSystemProxy();
+        if (this.captureProxy && this.captureProxy.stop) await this.captureProxy.stop();
+      } catch {}
+      process.exit(0);
     });
 
     try {
