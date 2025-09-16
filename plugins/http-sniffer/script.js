@@ -152,20 +152,16 @@
     let rewriteRules = null;
     try { const rr = (el('rewriteRules') && el('rewriteRules').value.trim()) || ''; if (rr) rewriteRules = JSON.parse(rr); } catch {}
     const maxBodyDirMB = Number(el('maxBodyDirMB') && el('maxBodyDirMB').value) || 512;
-    // 链式代理：默认开启，默认 system；关闭时不传 upstream 以保持现有逻辑一致
+    // 链式代理：默认关闭；仅当勾选且填写地址时才传
     let upstreamParam = undefined;
     try {
-      const enableUp = el('enableUpstream') ? !!el('enableUpstream').checked : true; // 默认启用
+      const enableUp = el('enableUpstream') ? !!el('enableUpstream').checked : false; // 默认关闭
       if (enableUp) {
         const addrRaw = (el('upstreamAddr') && el('upstreamAddr').value || '').trim();
-        const addr = addrRaw || 'system';
-        if (addr.toLowerCase() === 'system') {
-          upstreamParam = 'system';
-        } else {
+        if (addrRaw) {
           // 允许直接填 host:port 或带协议的 URL (http/https/socks/socks5)
           const norm = (s) => (/^(https?|socks|socks5):\/\//i.test(s) ? s : ('http://' + s));
-          let url = norm(addr);
-          // 容错：若出现 http://socks5://... 则去掉前面的 http://
+          let url = norm(addrRaw);
           if (/^https?:\/\/socks/i.test(url)) url = url.replace(/^https?:\/\//i, '');
           upstreamParam = { http: url, https: url };
         }
@@ -294,15 +290,15 @@
         btnEl.disabled = true;
         
         // 获取当前上游地址配置
-        const enableUpstream = el('enableUpstream') ? !!el('enableUpstream').checked : true;
-        if (!enableUpstream) {
+        const enableUpstream = el('enableUpstream') ? !!el('enableUpstream').checked : false;
+        const addrRaw = (el('upstreamAddr') && el('upstreamAddr').value || '').trim();
+        if (!enableUpstream || !addrRaw) {
           statusEl.textContent = '已禁用';
           statusEl.className = 'pill bad';
           btnEl.disabled = false;
           return;
         }
-        
-        let upstreamAddr = (el('upstreamAddr') && el('upstreamAddr').value || '').trim() || 'system';
+        let upstreamAddr = addrRaw;
         // 如果是填入的 127.0.0.1:10808 这样的地址，根据端口推断协议
         if (upstreamAddr !== 'system' && !/^(https?|socks)/i.test(upstreamAddr)) {
           if (/:\d+$/.test(upstreamAddr)) {
@@ -321,7 +317,7 @@
         toast(`正在测试代理连通性...\n测试端点: ${urlLabel}\n测试地址: ${selectedTestUrl}`);
         
         // 使用用户选择的测试端点
-        const ret = await window.MT.invoke('capture.testUpstream', { 
+        const ret = await window.MT.invoke('capture.testUpstream', {
           upstream: upstreamAddr,
           testUrl: selectedTestUrl
         });
@@ -438,8 +434,8 @@
             upStatus.className = 'pill';
           }
         };
-        upChk.addEventListener('change', sync);
-        sync();
+        upChk.addEventListener('change', async ()=>{ sync(); await syncSystemUpstreamState(); });
+        syncSystemUpstreamState();
       }
       
       // 监听代理地址和测试URL变化，重置测试状态
@@ -450,7 +446,7 @@
         }
       };
       
-      if (upAddr) upAddr.addEventListener('input', resetTestStatus);
+      if (upAddr) upAddr.addEventListener('input', async ()=>{ resetTestStatus(); await syncSystemUpstreamState(); });
       if (testUrlSelect) testUrlSelect.addEventListener('change', resetTestStatus);
     } catch {}
     
@@ -477,6 +473,36 @@
     } catch {}
   }
 
+  // 同步系统代理状态与“链式代理”控件的一致性
+  async function syncSystemUpstreamState(){
+    try {
+      const upChk = el('enableUpstream');
+      const upAddr = el('upstreamAddr');
+      const upStatus = el('upstreamStatus');
+      const upTestBtn = el('btnTestUpstream');
+      const testUrlSelect = el('testUrlSelect');
+      if (!upChk || !upAddr) return;
+      const val = String(upAddr.value || '').trim().toLowerCase();
+      if (val === 'system') {
+        let sysOn = false;
+        try {
+          const st = await window.MT.invoke('capture.status');
+          sysOn = !!(st && st.proxyState && st.proxyState.enable === 1);
+        } catch {}
+        if (!sysOn) {
+          // 系统代理未启用：强制关闭链式代理勾选并禁用相关控件
+          upChk.checked = false;
+          try {
+            upAddr.disabled = true;
+            if (upTestBtn) upTestBtn.disabled = true;
+            if (testUrlSelect) testUrlSelect.disabled = true;
+            if (upStatus) { upStatus.textContent = '系统未启用'; upStatus.className = 'pill bad'; }
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+
   // ====== 设置持久化（仅在“应用”时保存；启动时读取并应用） ======
   async function saveSettings(){
     try {
@@ -485,9 +511,8 @@
       const pathPrefixes = (el('capPrefix') && el('capPrefix').value.trim()) || '';
       const rewriteRules = (el('rewriteRules') && el('rewriteRules').value) || '';
       const maxBodyDirMB = Number(el('maxBodyDirMB') && el('maxBodyDirMB').value) || 512;
-      const enableUpstream = el('enableUpstream') ? !!el('enableUpstream').checked : true;
-      const upstreamAddr = (el('upstreamAddr') && el('upstreamAddr').value) || 'system';
-      const settings = { targets, pathPrefixes, rewriteRules, maxBodyDirMB, enableUpstream, upstreamAddr };
+      // 注意：enableUpstream / upstreamAddr 为系统判定项，不入库
+      const settings = { targets, pathPrefixes, rewriteRules, maxBodyDirMB };
       await window.MT.db.put('http-sniffer.settings', settings);
     } catch (e) { try { console.warn('[HTTP-SNIFFER] saveSettings failed', e && e.message); } catch {} }
   }
@@ -502,9 +527,6 @@
         if (val.pathPrefixes != null && el('capPrefix')) el('capPrefix').value = String(val.pathPrefixes || '');
         if (val.rewriteRules != null && el('rewriteRules')) el('rewriteRules').value = String(val.rewriteRules || '');
         if (val.maxBodyDirMB != null && el('maxBodyDirMB')) el('maxBodyDirMB').value = String(val.maxBodyDirMB || '512');
-        if (el('enableUpstream')) el('enableUpstream').checked = (val.enableUpstream !== false);
-        if (el('upstreamAddr')) el('upstreamAddr').value = String(val.upstreamAddr || 'system');
-        try { if (el('upstreamAddr')) el('upstreamAddr').disabled = !(el('enableUpstream') ? el('enableUpstream').checked : true); } catch {}
         return true;
       }
       return false;
@@ -523,6 +545,7 @@
     try {
       // 先加载已保存设置并填充输入框
       await loadSettingsAndFillInputs();
+      await syncSystemUpstreamState();
       await start();
     } catch (e) { toast('自动启动失败，请手动启动'); }
     loop();

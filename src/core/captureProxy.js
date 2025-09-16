@@ -1513,44 +1513,13 @@ class CaptureProxyService {
   // ---------- 手动测试上游连通性 ----------
   async testUpstreamConnectivity({ upstream = null, testUrl = null } = {}) {
     try {
-      // 如果没有指定upstream，使用当前配置的
+      // 仅支持显式传入的上游；未传入则判为未配置
       let testUpstream = upstream;
       if (!testUpstream) {
-        testUpstream = this._upstreamHttpUrl || this._upstreamHttpsUrl;
+        return { ok: false, error: '未配置上游代理' };
       }
-      
-      // 如果是 "system"，解析实际的系统代理
-      if (testUpstream === 'system' || !testUpstream) {
-        try {
-          let orig = null;
-          try { const backup = await this._loadProxyBackup(); orig = backup && backup.original; } catch {}
-          const st = await this.querySystemProxy();
-          const eff = orig || st || null;
-          if (!eff || eff.enable !== 1) {
-            return { ok: false, error: '系统代理未启用' };
-          }
-          const server = (eff && eff.server) || '';
-          if (!server) {
-            return { ok: false, error: '系统未配置代理' };
-          }
-          const parsed = this._parseWinProxyServer(server);
-          testUpstream = parsed.http || parsed.https;
-          if (parsed.socks && String(parsed.socks).trim()) {
-            testUpstream = `socks5://${parsed.socks}`;
-          } else if (testUpstream && !/^(https?|socks)/i.test(testUpstream)) {
-            // 确保有协议前缀
-            testUpstream = `http://${testUpstream}`;
-          }
-          if (!testUpstream) {
-            return { ok: false, error: '无法解析系统代理配置' };
-          }
-        } catch (e) {
-          return { ok: false, error: '系统代理解析失败: ' + (e.message || '未知错误') };
-        }
-      }
-      
-      // 确保非system代理地址有协议前缀
-      if (testUpstream && testUpstream !== 'system') {
+      // 规范化：host:port -> http://host:port；常见 socks 端口推断为 socks5
+      if (testUpstream) {
         if (!/^(https?|socks)/i.test(testUpstream)) {
           // 根据端口号推断协议类型
           if (/:\d+$/.test(testUpstream)) {
@@ -1564,10 +1533,6 @@ class CaptureProxyService {
             testUpstream = `http://${testUpstream}`;
           }
         }
-      }
-      
-      if (!testUpstream) {
-        return { ok: false, error: '未配置上游代理' };
       }
 
       const startTime = Date.now();
@@ -1701,51 +1666,14 @@ class CaptureProxyService {
       }
 
       let httpUrl = null, httpsUrl = null, bypassRaw = '';
-      if (upstream === 'system' || upstream === true) {
-        // 优先使用备份里 original（启用我们前的系统代理），兜底当前注册表
-        let orig = null;
-        try { const backup = await this._loadProxyBackup(); orig = backup && backup.original; } catch {}
-        const st = await this.querySystemProxy();
-        const eff = orig || st || null;
-        if (!eff || eff.enable !== 1) {
-          try { if (!this.isQuiet) console.log('[CAPTURE][UPSTREAM] system proxy disabled, skip upstream'); } catch {}
-          return; // 系统代理未启用：不设置上游
-        }
-        const server = (eff && eff.server) || '';
-        // 强制链式：不继承系统 ProxyOverride，避免在家庭网络下被大范围绕过，但保留内网地址绕过
-        const override = '<local>;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*;169.254.*';
-        const parsed = this._parseWinProxyServer(server);
-        httpUrl = parsed.http; httpsUrl = parsed.https; bypassRaw = override || '';
-        if (parsed.socks && String(parsed.socks).trim()) {
-          const socksAddr = String(parsed.socks).trim();
-          httpUrl = `socks5://${socksAddr}`;
-          httpsUrl = `socks5://${socksAddr}`;
-        } else {
-          const pick = (u) => {
-            if (!u) return null;
-            if (/^(https?|socks)/i.test(u)) return u;
-            try {
-              const m = String(u).match(/:(\d+)$/);
-              const port = m ? parseInt(m[1], 10) : 0;
-              if (port === 1080 || port === 10808 || port === 1086) return `socks5://${u}`;
-            } catch {}
-            return u;
-          };
-          httpUrl = pick(httpUrl);
-          httpsUrl = pick(httpsUrl) || httpUrl;
-        }
-      } else if (typeof upstream === 'object') {
+      if (typeof upstream === 'object') {
         const u = upstream || {};
         httpUrl = u.http || u.https || u.url || null;
         httpsUrl = u.https || u.http || u.url || null;
         bypassRaw = u.bypass || '';
       } else if (typeof upstream === 'string') {
         const s = String(upstream || '').trim();
-        if (s.toLowerCase() === 'system') {
-          return await this._prepareUpstream('system');
-        } else {
-          httpUrl = s; httpsUrl = s;
-        }
+        httpUrl = s; httpsUrl = s;
       }
 
       const norm = (u) => {
