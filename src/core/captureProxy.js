@@ -526,7 +526,7 @@ class CaptureProxyService {
     // 备份当前系统代理
     try {
       const st = await this.querySystemProxy();
-      const prev = { enable: st.enable, server: st.server, override: st.override };
+      const prev = { enable: st.enable, server: st.server, override: st.override, autoConfigURL: st.autoConfigURL, autoDetect: st.autoDetect };
       await this._saveProxyBackup(prev, { ourServer: server });
     } catch {}
     const steps = [
@@ -568,10 +568,44 @@ class CaptureProxyService {
     
     // 优先尝试恢复备份
     try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] attempting backup restore...'); } catch {}
+    const backup = await this._loadProxyBackup();
+    const original = backup && backup.original;
+    const ourFromBackup = backup && backup.last && backup.last.ourServer;
+    const our = this._ourServer || ourFromBackup || '';
     let ok = await this._restoreProxyBackup();
     
     if (ok) {
       try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] backup restored successfully'); } catch {}
+      // 通知系统设置变更并比对是否与 original 一致
+      await this._notifyInternetSettingsChanged();
+      let finalState = await this.querySystemProxy();
+      try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] state after reg-restore:', finalState); } catch {}
+      if (original && !this._proxyStateEquals(finalState, original)) {
+        // 用 PowerShell 再次强制写入 original
+        await this._setProxyRegistryViaPowerShell({
+          enable: original.enable,
+          server: original.server,
+          override: original.override,
+          autoConfigURL: original.autoConfigURL,
+          autoDetect: original.autoDetect
+        });
+        await this._notifyInternetSettingsChanged();
+        finalState = await this.querySystemProxy();
+        try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] state after ps-restore:', finalState); } catch {}
+      }
+      // 若仍指向我们自身，则作为最后兜底禁用（避免遗留指向自身导致断网）
+      const stillOurs = finalState && finalState.enable === 1 && our && finalState.server === our;
+      if (stillOurs) {
+        try { if (!this.isQuiet) console.warn('[CAPTURE][SYS-PROXY][disable] still points to us, disabling as last resort'); } catch {}
+        let r = await this._spawnCapture(regExe, ['add', base, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f']);
+        let disabled = r && r.code === 0;
+        if (!disabled) disabled = await this._unsetProxyViaPowerShell();
+        await this._notifyInternetSettingsChanged();
+        finalState = await this.querySystemProxy();
+        ok = ok && !!disabled;
+      }
+      try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] final state:', finalState); } catch {}
+      return { ok, state: finalState };
     } else {
       try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] backup restore failed, using fallback...'); } catch {}
       
@@ -590,33 +624,12 @@ class CaptureProxyService {
           try { if (!this.isQuiet) console.error('[CAPTURE][SYS-PROXY][disable] all methods failed'); } catch {}
         }
       }
-    }
-    
-    // 通知系统设置变更
-    await this._notifyInternetSettingsChanged();
-    
-    // 验证最终状态
-    let finalState = await this.querySystemProxy();
-    // 兜底：若仍为启用状态，强制关闭一次并再次验证
-    if (finalState && finalState.enable === 1) {
-      try {
-        const base = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
-        const regExe = this._getRegExePath();
-        await this._spawnCapture(regExe, ['add', base, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f']);
-      } catch {}
-      try { await this._unsetProxyViaPowerShell(); } catch {}
+      // 通知并返回最终状态
       await this._notifyInternetSettingsChanged();
-      finalState = await this.querySystemProxy();
+      const finalState = await this.querySystemProxy();
+      try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] final state:', finalState); } catch {}
+      return { ok, state: finalState };
     }
-    try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][disable] final state:', finalState); } catch {}
-    
-    // 额外验证：如果仍然启用且指向我们，报告警告
-    const our = this._ourServer;
-    if (finalState && finalState.enable === 1 && our && finalState.server === our) {
-      try { console.warn('[CAPTURE][SYS-PROXY][disable] WARNING: system proxy still points to us after disable attempt'); } catch {}
-    }
-    
-    return { ok, state: finalState };
   }
 
   // 安装根证书（当前用户）
@@ -800,7 +813,22 @@ class CaptureProxyService {
       const okEnable = await this._setProxyRegistry({ enable: orig.enable });
       const okRest = await this._setProxyRegistry({ server: orig.server, override: orig.override, autoConfigURL: orig.autoConfigURL, autoDetect: orig.autoDetect });
       await this._notifyInternetSettingsChanged();
-      return !!(okEnable && okRest);
+      let ok = !!(okEnable && okRest);
+      try {
+        const after = await this.querySystemProxy();
+        const matched = this._proxyStateEquals(after, orig);
+        if (!matched) {
+          if (!this.isQuiet) console.warn('[CAPTURE][SYS-PROXY][restore] registry restore mismatch, trying PowerShell fallback...', { after, orig });
+          const psOk = await this._setProxyRegistryViaPowerShell({ enable: orig.enable, server: orig.server, override: orig.override, autoConfigURL: orig.autoConfigURL, autoDetect: orig.autoDetect });
+          await this._notifyInternetSettingsChanged();
+          const after2 = await this.querySystemProxy();
+          ok = psOk && this._proxyStateEquals(after2, orig);
+          if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][restore] PowerShell fallback =>', ok ? 'OK' : 'FAIL');
+        } else {
+          ok = true;
+        }
+      } catch {}
+      return !!ok;
     } catch { return false; }
   }
 
@@ -819,6 +847,46 @@ class CaptureProxyService {
         if (!(r && r.code === 0)) return false;
       }
       return true;
+    } catch { return false; }
+  }
+
+  _proxyStateEquals(a, b) {
+    try {
+      if (!a || !b) return false;
+      const num = (v) => Number(v || 0);
+      const trim = (s) => (s == null ? '' : String(s).trim());
+      const canonServer = (s) => {
+        const p = this._parseWinProxyServer(s);
+        const http = trim(p.http);
+        const https = trim(p.https);
+        const socks = trim(p.socks);
+        return `http=${http};https=${https};socks=${socks}`;
+      };
+      const eq = (x, y) => trim(x) === trim(y);
+      const enableOk = num(a.enable) === num(b.enable);
+      const serverOk = canonServer(a.server) === canonServer(b.server);
+      const overrideOk = eq(a.override, b.override);
+      const pacOk = eq(a.autoConfigURL, b.autoConfigURL);
+      const autoDetectOk = num(a.autoDetect) === num(b.autoDetect);
+      return !!(enableOk && serverOk && overrideOk && pacOk && autoDetectOk);
+    } catch { return false; }
+  }
+
+  async _setProxyRegistryViaPowerShell({ enable, server, override, autoConfigURL, autoDetect }) {
+    try {
+      const kv = [];
+      const setDword = (name, val) => kv.push(`Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ${name} -Type DWord -Value ${String(Number(!!val))}`);
+      const setString = (name, val) => kv.push(`Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' -Name ${name} -Type String -Value ${this._psQuote(String(val))}`);
+      if (enable != null) setDword('ProxyEnable', enable);
+      if (server != null) setString('ProxyServer', server);
+      if (override != null) setString('ProxyOverride', override);
+      if (autoConfigURL != null) setString('AutoConfigURL', autoConfigURL);
+      if (autoDetect != null) setDword('AutoDetect', autoDetect);
+      if (!kv.length) return true;
+      const ps = kv.join('; ');
+      const ok = await this._spawnOk('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps]);
+      try { if (!this.isQuiet) console.log('[CAPTURE][SYS-PROXY][ps][set]', ok ? 'OK' : 'FAIL'); } catch {}
+      return ok;
     } catch { return false; }
   }
 

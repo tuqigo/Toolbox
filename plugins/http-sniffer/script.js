@@ -10,6 +10,8 @@
   let timer = null;
   let lastItems = [];
   let selectedId = null;
+  let _cleanupStarted = false;
+  let _cleanupDone = false;
 
   function fmtTime(ts){ const d = new Date(ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`; }
 
@@ -551,18 +553,24 @@
     loop();
   });
 
+  function cleanupOnce(){
+    if (_cleanupDone || _cleanupStarted) return;
+    _cleanupStarted = true;
+    try {
+      if (timer) clearTimeout(timer);
+      try { console.info('[HTTP-SNIFFER] cleanupOnce: attempting system proxy restore and service stop'); } catch {}
+      // 尽力而为：不等待结果，避免阻塞页面关闭
+      window.MT.invoke('capture.disableSystemProxy');
+      window.MT.invoke('capture.stop');
+    } catch {}
+    _cleanupDone = true;
+  }
+
   // 页面卸载时的清理（同步执行，不能使用async）
   window.addEventListener('beforeunload', (event) => {
     try {
-      if (timer) clearTimeout(timer);
       try { console.info('[HTTP-SNIFFER] beforeunload: starting emergency cleanup...'); } catch {}
-      // 注意：beforeunload不支持async，但我们尝试同步调用
-      // 为了更可靠的清理，我们在多个地方都添加了保护
-      try {
-        // 使用同步的方式尝试清理（虽然invoke本身是异步的）
-        window.MT.invoke('capture.disableSystemProxy');
-        window.MT.invoke('capture.stop');
-      } catch {}
+      cleanupOnce();
     } catch {}
   });
   
@@ -570,8 +578,7 @@
   window.addEventListener('pagehide', (event) => {
     try {
       try { console.info('[HTTP-SNIFFER] pagehide: cleanup triggered'); } catch {}
-      window.MT.invoke('capture.disableSystemProxy');
-      window.MT.invoke('capture.stop');
+      cleanupOnce();
     } catch {}
   });
   
@@ -579,8 +586,7 @@
   window.addEventListener('unload', (event) => {
     try {
       try { console.info('[HTTP-SNIFFER] unload: final cleanup attempt'); } catch {}
-      window.MT.invoke('capture.disableSystemProxy');
-      window.MT.invoke('capture.stop');
+      cleanupOnce();
     } catch {}
   });
 })();
