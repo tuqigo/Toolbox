@@ -1971,20 +1971,17 @@ class CaptureProxyService {
           continue;
         }
         
-        // IP地址模式匹配（如 10.* 匹配 10.10.200.232）
+        // IP地址模式匹配，支持前缀通配（如 10.*、172.16.*、192.168.*）
         if (pat.includes('*') && isIPv4) {
           const patParts = pat.split('.');
           const hostParts = h.split('.');
-          if (patParts.length === hostParts.length) {
-            let match = true;
-            for (let i = 0; i < patParts.length; i++) {
-              if (patParts[i] !== '*' && patParts[i] !== hostParts[i]) {
-                match = false;
-                break;
-              }
-            }
-            if (match) return true;
+          let match = true;
+          const len = Math.min(patParts.length, hostParts.length);
+          for (let i = 0; i < len; i++) {
+            if (patParts[i] === '*') continue;
+            if (patParts[i] !== hostParts[i]) { match = false; break; }
           }
+          if (match) return true;
           continue;
         }
         

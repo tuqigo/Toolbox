@@ -955,7 +955,11 @@ class MiniToolbox {
           case 'capture.replay':
             try { const r = await this.captureProxy.replay(payload || {}); return r; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
           case 'capture.testUpstream':
-            try { const ret = await this.captureProxy.testUpstreamConnectivity(payload || {}); return ret; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+            try {
+              const ret = await this.captureProxy.testUpstreamConnectivity(payload || {});
+              // 统一返回包装，便于 preload 解包后插件拿到结构化结果
+              return { ok: true, data: ret };
+            } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
           // DB & Stats 通道（仅允许真实来源插件访问自身命名空间）
           case 'db.put': {
             let { collection, key, value, featureCode: fc } = payload || {};
