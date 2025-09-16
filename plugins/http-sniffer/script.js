@@ -40,19 +40,7 @@
         if (info) {
           const thumb = d.caThumbprint || '-';
           const path = d.caPath || '-';
-          let pacInfo = '-';
-          if (d.proxyState && d.proxyState.autoConfigURL) {
-            pacInfo = d.proxyState.autoConfigURL;
-            // 如果是文件路径，尝试读取内容
-            if (pacInfo.startsWith('file:')) {
-              try {
-                // 简化显示：路径 + 前50字符内容
-                const shortPath = pacInfo.replace('file:///', '').substring(0, 50);
-                pacInfo = `${shortPath}...`;
-              } catch {}
-            }
-          }
-          info.textContent = `证书指纹(SHA1): ${thumb}\nCA路径: ${path}\nPAC: ${pacInfo}`;
+          info.textContent = `证书指纹(SHA1): ${thumb}\nCA路径: ${path}`;
         }
       } catch {}
     }catch(e){ statusEl().textContent = '状态获取失败'; }

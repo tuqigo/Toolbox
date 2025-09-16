@@ -98,6 +98,7 @@
       "node_modules/proxy-from-env/**/*",
       "node_modules/socks/**/*",
       "node_modules/smart-buffer/**/*",
+      "node_modules/ip-address/**/*",
       "node_modules/ip/**/*",
       "node_modules/async/**/*",
       "node_modules/ws/**/*",
