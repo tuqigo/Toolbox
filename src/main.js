@@ -28,6 +28,7 @@ const { IconManager } = require('./core/iconManager');
 const { DBStore } = require('./core/dbStore');
 const { FileLogger } = require('./utils/logger');
 const { CaptureProxyService } = require('./core/captureProxy');
+const { getThemeTokens } = require('./core/themeTokens');
 const { pathToFileURL } = require('url');
 
 class MiniToolbox {
@@ -1037,9 +1038,11 @@ class MiniToolbox {
               const { nativeTheme } = require('electron');
               const cur = this.currentTheme || 'system';
               const eff = cur === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : cur;
-              return { ok: true, data: { theme: cur, effective: eff } };
+              const tokens = getThemeTokens();
+              return { ok: true, data: { theme: cur, effective: eff, tokens } };
             } catch (e) {
-              return { ok: true, data: { theme: 'system', effective: 'light' } };
+              const tokens = getThemeTokens();
+              return { ok: true, data: { theme: 'system', effective: 'light', tokens } };
             }
           }
           case 'plugin.list': {
@@ -1937,7 +1940,8 @@ class MiniToolbox {
       };
       
       const palette = palettes[effective] || palettes.light;
-      const themeData = { theme, effective, palette };
+      const tokens = getThemeTokens();
+      const themeData = { theme, effective, palette, tokens };
       
       // 广播给插件窗口
       this.windowManager.broadcastTheme(themeData);

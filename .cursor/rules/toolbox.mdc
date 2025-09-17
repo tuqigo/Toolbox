@@ -69,7 +69,7 @@ alwaysApply: true
 - 若需外部能力，建议通过 `mt.secure-call` 扩展通道，不在插件中直调 Node API。
 
 
-## 主题策略 
-- 有页面的插件要做暗黑和明两种主题适配  window.MT.invoke('ui.getTheme') 可以拿到当前主题 ，tooltip 的纵/横滚动条与轨道均接入主题变量
+## 重要策略 
+- 有页面的插件要做暗黑和明两种主题适配  window.MT.invoke('ui.getTheme') 具体请看 themeTokens.js的具体语义
 - 要求你画图的时候使用mermaid语法
 - 插件内所有的通知在右下角 3秒显示自动隐藏

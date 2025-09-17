@@ -44,22 +44,58 @@
   <script defer src="script.js"></script>
   <script>
     (async function(){
-      function applyTheme(effective){
-        const root = document.documentElement;
-        if (effective === 'dark') {
-          root.setAttribute('data-theme', '');
-        } else {
-          root.setAttribute('data-theme', 'light');
-        }
-      }
       try {
-        const themeInfo = await window.MT.invoke('ui.getTheme');
-        const eff = (themeInfo && themeInfo.effective) || (themeInfo && themeInfo.data && themeInfo.data.effective) || 'light';
-        applyTheme(eff);
+        const info = await window.MT.invoke('ui.getTheme');
+        const eff = (info && (info.effective || (info.data && info.data.effective))) || 'light';
+        const tokens = (info && (info.tokens || (info.data && info.data.tokens))) || null;
+        const root = document.documentElement;
+        if (eff === 'dark') root.setAttribute('data-theme', ''); else root.setAttribute('data-theme', 'light');
+
+        function resolve(val, scope) {
+          if (typeof val === 'string' && /^\{.+\}$/.test(val)) {
+            const path = val.slice(1, -1).split('.');
+            let cur = scope;
+            for (const seg of path) { cur = cur && cur[seg]; }
+            return resolve(cur, scope);
+          }
+          return val;
+        }
+
+        if (tokens) {
+          const t = tokens[eff] || tokens.light;
+          if (t && t.color) {
+            const c = t.color;
+            const comp = t.component || {};
+            const sb = comp.scrollbar || {};
+            const tip = comp.tooltip || {};
+            const elev = t.elevation || {};
+
+            root.style.setProperty('--mt-bg', resolve(c.bg, t));
+            root.style.setProperty('--mt-panel', resolve(c.panel, t));
+            root.style.setProperty('--mt-panel-2', resolve(c.panel2 || c.panel, t));
+            root.style.setProperty('--mt-fg', resolve(c.fg, t));
+            root.style.setProperty('--mt-muted', resolve(c.muted || '#9aa3b2', t));
+            root.style.setProperty('--mt-border', resolve(c.border, t));
+            root.style.setProperty('--mt-primary', resolve(c.primary, t));
+            root.style.setProperty('--mt-on-primary', resolve(c.onPrimary || '#ffffff', t));
+            root.style.setProperty('--mt-ok', resolve(c.ok || '#3cc86b', t));
+            root.style.setProperty('--mt-warn', resolve(c.warn || '#ffb86c', t));
+            root.style.setProperty('--mt-bad', resolve(c.bad || '#ff6b6b', t));
+
+            root.style.setProperty('--mt-scrollbar-track', resolve(sb.track || 'transparent', t));
+            root.style.setProperty('--mt-scrollbar-thumb', resolve(sb.thumb || '#999', t));
+            root.style.setProperty('--mt-scrollbar-thumb-hover', resolve(sb.thumbHover || '#aaa', t));
+
+            root.style.setProperty('--mt-tooltip-bg', resolve(tip.bg || c.panel, t));
+            root.style.setProperty('--mt-tooltip-fg', resolve(tip.fg || c.fg, t));
+            root.style.setProperty('--mt-tooltip-border', resolve(tip.border || c.border, t));
+
+            root.style.setProperty('--mt-shadow-1', resolve(elev.surface || '0 6px 20px rgba(0,0,0,0.12)', t));
+            root.style.setProperty('--mt-shadow-2', resolve(elev.overlay || '0 8px 24px rgba(0,0,0,0.12)', t));
+            root.style.setProperty('--mt-shadow', resolve(elev.overlay || elev.surface || '0 8px 24px rgba(0,0,0,0.12)', t));
+          }
+        }
       } catch {}
-      window.addEventListener('mt-theme-change', (ev)=>{
-        try { applyTheme((ev && ev.detail && ev.detail.effective) || 'light'); } catch {}
-      });
     })();
   </script>
 </head>

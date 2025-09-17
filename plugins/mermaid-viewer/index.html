@@ -5,37 +5,34 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Mermaid 图表查看器</title>
   <style>
+    :root{
+      --mt-bg:#ffffff; --mt-panel:#ffffff; --mt-panel-2:#f8f9fa; --mt-fg:#212529; --mt-muted:#6c757d; --mt-border:#e5e7eb; --mt-primary:#0d6efd;
+      --mt-scrollbar-track:#f3f4f6; --mt-scrollbar-thumb:#d1d5db; --mt-scrollbar-thumb-hover:#9ca3af;
+    }
+    :root[data-theme="dark"]{
+      --mt-bg:#0f1113; --mt-panel:#2b2d31; --mt-panel-2:#1c1e22; --mt-fg:#e6e7ea; --mt-muted:#9aa3b2; --mt-border:#3a3b41; --mt-primary:#4f8cff;
+      --mt-scrollbar-track:#1c1e22; --mt-scrollbar-thumb:#3a3b41; --mt-scrollbar-thumb-hover:#4a4b51;
+    }
     body { 
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
       margin: 0; 
       display: flex; 
       height: 100vh;
-      background: #f8f9fa;
+      background: var(--mt-bg);
+      color: var(--mt-fg);
     }
     
     .sidebar {
       width: 350px;
-      background: white;
-      border-right: 1px solid #e9ecef;
+      background: var(--mt-panel);
+      border-right: 1px solid var(--mt-border);
       display: flex;
       flex-direction: column;
     }
     
-    .main-content {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      background: white;
-    }
+    .main-content { flex: 1; display: flex; flex-direction: column; background: var(--mt-panel); }
     
-    .toolbar {
-      padding: 12px;
-      border-bottom: 1px solid #e9ecef;
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      background: #f8f9fa;
-    }
+    .toolbar { padding: 12px; border-bottom: 1px solid var(--mt-border); display: flex; gap: 8px; align-items: center; background: var(--mt-panel-2); }
     
     .editor-container {
       flex: 1;
@@ -44,14 +41,7 @@
       padding: 0;
     }
     
-    .editor-header {
-      padding: 8px 12px;
-      background: #f8f9fa;
-      border-bottom: 1px solid #e9ecef;
-      font-size: 13px;
-      font-weight: 500;
-      color: #495057;
-    }
+    .editor-header { padding: 8px 12px; background: var(--mt-panel-2); border-bottom: 1px solid var(--mt-border); font-size: 13px; font-weight: 500; color: var(--mt-muted); }
     
     textarea {
       flex: 1;
@@ -62,7 +52,8 @@
       font-size: 13px;
       line-height: 1.5;
       resize: none;
-      background: #fafbfc;
+      background: var(--mt-panel-2);
+      color: var(--mt-fg);
     }
     
     .viewer-container {
@@ -72,29 +63,9 @@
       overflow: hidden;
     }
     
-    .viewer-header {
-      padding: 8px 12px;
-      background: #f8f9fa;
-      border-bottom: 1px solid #e9ecef;
-      font-size: 13px;
-      font-weight: 500;
-      color: #495057;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
+    .viewer-header { padding: 8px 12px; background: var(--mt-panel-2); border-bottom: 1px solid var(--mt-border); font-size: 13px; font-weight: 500; color: var(--mt-muted); display: flex; justify-content: space-between; align-items: center; }
     
-    .viewer-content {
-      flex: 1;
-      overflow: hidden;
-      padding: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: white;
-      user-select: none;
-      position: relative;
-    }
+    .viewer-content { flex: 1; overflow: hidden; padding: 20px; display: flex; align-items: center; justify-content: center; background: var(--mt-panel); user-select: none; position: relative; }
     
     #mermaid-diagram {
       max-width: none;
@@ -110,9 +81,9 @@
     }
     
     .error-message {
-      color: #dc3545;
-      background: #f8d7da;
-      border: 1px solid #f5c6cb;
+      color: var(--mt-bad);
+      background: rgba(220,53,69,0.12);
+      border: 1px solid rgba(220,53,69,0.28);
       border-radius: 4px;
       padding: 12px;
       margin: 20px;
@@ -120,37 +91,13 @@
       display: none;
     }
     
-    .btn {
-      padding: 6px 12px;
-      border: 1px solid #dee2e6;
-      border-radius: 4px;
-      background: white;
-      color: #495057;
-      cursor: pointer;
-      font-size: 13px;
-      transition: all 0.2s;
-    }
+    .btn { padding: 6px 12px; border: 1px solid var(--mt-border); border-radius: 4px; background: var(--mt-panel); color: var(--mt-fg); cursor: pointer; font-size: 13px; transition: all 0.2s; }
+    .btn:hover { background: var(--mt-panel-2); border-color: var(--mt-primary); }
     
-    .btn:hover {
-      background: #e9ecef;
-      border-color: #adb5bd;
-    }
+    .btn-primary { background: var(--mt-primary); border-color: var(--mt-primary); color: #fff; }
+    .btn-primary:hover { filter: brightness(0.95); }
     
-    .btn-primary {
-      background: #007bff;
-      border-color: #007bff;
-      color: white;
-    }
-    
-    .btn-primary:hover {
-      background: #0056b3;
-      border-color: #0056b3;
-    }
-    
-    .status {
-      font-size: 12px;
-      color: #6c757d;
-    }
+    .status { font-size: 12px; color: var(--mt-muted); }
     
     .loading {
       display: inline-block;
@@ -168,41 +115,60 @@
       100% { transform: rotate(360deg); }
     }
     
-    .examples {
-      padding: 12px;
-      border-top: 1px solid #e9ecef;
-      background: #f8f9fa;
-    }
+    .examples { padding: 12px; border-top: 1px solid var(--mt-border); background: var(--mt-panel-2); }
     
-    .example-item {
-      margin-bottom: 8px;
-      padding: 8px;
-      background: white;
-      border: 1px solid #e9ecef;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-      transition: all 0.2s;
-    }
+    .example-item { margin-bottom: 8px; padding: 8px; background: var(--mt-panel); border: 1px solid var(--mt-border); border-radius: 4px; cursor: pointer; font-size: 12px; transition: all 0.2s; }
+    .example-item:hover { background: var(--mt-panel-2); }
     
-    .example-item:hover {
-      background: #e9ecef;
-    }
-    
-    .example-title {
-      font-weight: 500;
-      color: #495057;
-      margin-bottom: 4px;
-    }
-    
-    .example-desc {
-      color: #6c757d;
-      font-size: 11px;
-    }
+    .example-title { font-weight: 500; color: var(--mt-fg); margin-bottom: 4px; }
+    .example-desc { color: var(--mt-muted); font-size: 11px; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: var(--mt-scrollbar-track); }
+    ::-webkit-scrollbar-thumb { background: var(--mt-scrollbar-thumb); border-radius: 6px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--mt-scrollbar-thumb-hover); }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
   <script>
     window.MTAPI = window.MT;
+  </script>
+  <script>
+    (async function(){
+      try {
+        const info = await window.MT.invoke('ui.getTheme');
+        const eff = (info && (info.effective || (info.data && info.data.effective))) || 'light';
+        const tokens = (info && (info.tokens || (info.data && info.data.tokens))) || null;
+        const root = document.documentElement;
+        root.setAttribute('data-theme', eff === 'dark' ? 'dark' : 'light');
+        function resolve(val, scope) {
+          if (typeof val === 'string' && /^\{.+\}$/.test(val)) {
+            const path = val.slice(1, -1).split('.');
+            let cur = scope;
+            for (const seg of path) { cur = cur && cur[seg]; }
+            return resolve(cur, scope);
+          }
+          return val;
+        }
+        if (tokens) {
+          const t = tokens[eff] || tokens.light;
+          const c = t && t.color || {};
+          const comp = t && t.component || {};
+          const sb = comp.scrollbar || {};
+          root.style.setProperty('--mt-bg', resolve(c.bg, t));
+          root.style.setProperty('--mt-panel', resolve(c.panel, t));
+          root.style.setProperty('--mt-panel-2', resolve(c.panel2 || c.panel, t));
+          root.style.setProperty('--mt-fg', resolve(c.fg, t));
+          root.style.setProperty('--mt-muted', resolve(c.muted || '#6c757d', t));
+          root.style.setProperty('--mt-border', resolve(c.border, t));
+          root.style.setProperty('--mt-primary', resolve(c.primary, t));
+          root.style.setProperty('--mt-scrollbar-track', resolve(sb.track || 'transparent', t));
+          root.style.setProperty('--mt-scrollbar-thumb', resolve(sb.thumb || '#999', t));
+          root.style.setProperty('--mt-scrollbar-thumb-hover', resolve(sb.thumbHover || '#aaa', t));
+          // Mermaid 主题
+          const themeName = eff === 'dark' ? 'dark' : 'default';
+          mermaid.initialize({ startOnLoad: false, theme: themeName, securityLevel: 'loose', fontFamily: 'ui-sans-serif, system-ui, sans-serif' });
+        }
+      } catch {}
+    })();
   </script>
 </head>
 <body>
