@@ -119,7 +119,7 @@ class CaptureProxyService {
 
     // 核心钩子：请求/响应
     this.proxy.onError((ctx, err, kind) => {
-      try { if (!this.isQuiet) console.error('[CAPTURE][onError]', kind, err && err.message); } catch {}
+      try { if (!this.isQuiet && process.argv.includes('--dev')) console.error('[CAPTURE][onError]', kind, err && err.message); } catch {}
       // 移除自动熔断机制，让用户手动控制链式代理
       try {
         const msg = (err && err.message) || '';

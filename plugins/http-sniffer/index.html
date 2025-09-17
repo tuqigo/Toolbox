@@ -63,9 +63,10 @@
     tbody tr:hover { background: var(--panel-2); }
     .status-err { color: var(--bad); }
     .status-ok { color: var(--ok); }
-    .detail { overflow: auto; padding: 12px; background: var(--panel); }
+    .detail { overflow: hidden; padding: 12px; background: var(--panel); display: flex; flex-direction: column; }
     .note { color: var(--warn); margin-bottom: 8px; }
     .kv { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; background: var(--panel-2); border: 1px solid var(--border); padding: 10px; border-radius: 8px; }
+    #detailBox { overflow: auto; flex: 1 1 auto; min-height: 0; }
   </style>
   <script>
     window.MTAPI = window.MT;
@@ -167,7 +168,7 @@
         <thead><tr>
           <th style="width:72px">时间</th>
           <th style="width:64px">方法</th>
-          <th>主机</th>
+          <th  style="width:180px">主机</th>
           <th>路径</th>
           <th style="width:64px">状态</th>
           <th style="width:80px">耗时(ms)</th>
@@ -180,7 +181,7 @@
       <div style="display:flex; gap:8px; margin-bottom:8px;">
         <button id="btnCopyCurlPS" class="btn" title="复制为 PowerShell 友好 cURL">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4h18v2H3V4zm0 7h18v2H3v-2zm0 7h18v2H3v-2z"/></svg>
-          <span class="btn-text">复制cURL(PS)</span>
+          <span class="btn-text">复制cURL</span>
         </button>
         <select id="replayRoute" class="select" title="重放路由" style="height:30px;">
           <option value="direct">直连</option>
@@ -213,7 +214,7 @@
       <div class="group" style="grid-column: span 2;">
         <label>上游地址</label>
         <div style="display: flex; gap: 8px; align-items: center;">
-          <input id="upstreamAddr" type="text" class="input" placeholder="http://127.0.0.1:7890 / socks5://127.0.0.1:10808" style="flex: 1"/>
+          <input id="upstreamAddr" type="text" class="input" placeholder="socks5://127.0.0.1:10808 / http://127.0.0.1:7890" style="flex: 1"/>
           <select id="testUrlSelect" class="select" title="选择测试端点">
             <option value="https://www.google.com/generate_204">Google (国际)</option>
             <option value="https://www.googleapis.com/generate_204">Google APIs</option>
