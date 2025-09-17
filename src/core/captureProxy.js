@@ -98,6 +98,14 @@ class CaptureProxyService {
     this.filters = this._normalizeFilters(opts.filters || null);
     this.delayRules = this._normalizeDelayRules(opts.delayRules || null);
     this.maxBodyDirMB = Math.max(64, Number(opts.maxBodyDirMB || this.maxBodyDirMB || 512));
+    // 允许外部配置内联阈值（KB），超过则落盘，默认保持原 256KB
+    try {
+      if (opts.bodyInlineLimit != null) {
+        this.bodyInlineLimit = Math.max(1024, Number(opts.bodyInlineLimit));
+      } else if (opts.bodyInlineLimitKB != null) {
+        this.bodyInlineLimit = Math.max(1024, Number(opts.bodyInlineLimitKB) * 1024);
+      }
+    } catch {}
     this.rewriteRules = this._normalizeRewriteRules(opts.rewriteRules || null);
     // 预生成一次（可能端口稍后会变更，监听完成后再二次确认）
     try { this._ourServer = `${host}:${port}`; } catch {}
@@ -511,6 +519,57 @@ class CaptureProxyService {
     };
 
     return JSON.stringify(log, null, 2);
+  }
+
+  // 将 headers 对象转换为 HAR 所需的数组形式
+  _headersToArray(obj) {
+    try {
+      const arr = [];
+      const src = obj || {};
+      Object.keys(src).forEach((k) => {
+        arr.push({ name: k, value: String(src[k]) });
+      });
+      return arr;
+    } catch { return []; }
+  }
+
+  _safeText(s) {
+    try { return s == null ? '' : String(s); } catch { return ''; }
+  }
+
+  // 读取完整请求/响应体（不截断），用于前端复制
+  async getBody({ id, which = 'resp', prettyJson = true } = {}) {
+    try {
+      const rec = this.getRecordById(id);
+      if (!rec) return { ok: false, error: 'not found' };
+      const isResp = String(which || 'resp') !== 'req' ;
+      const inline = isResp ? rec.respBodyInline : rec.reqBodyInline;
+      const filePath = isResp ? rec.respBodyPath : rec.reqBodyPath;
+      const mime = isResp ? (rec.mime || (rec.respHeaders && (rec.respHeaders['content-type'] || rec.respHeaders['Content-Type']) || ''))
+                          : ((rec.reqHeaders && (rec.reqHeaders['content-type'] || rec.reqHeaders['Content-Type'])) || '');
+      let buf = null;
+      if (inline != null) {
+        buf = Buffer.from(String(inline), 'utf8');
+      } else if (filePath) {
+        try { buf = await fs.readFile(filePath); } catch {}
+      }
+      if (!buf) return { ok: true, data: { text: '', bytes: 0, isJson: false } };
+      let text = '';
+      let isJson = false;
+      try {
+        text = buf.toString('utf8');
+      } catch { text = ''; }
+      try {
+        if (prettyJson && (this._isJsonLike(mime) || (text && /^[\s\r\n]*[\[{]/.test(text)))) {
+          const obj = JSON.parse(text);
+          text = JSON.stringify(obj, null, 2);
+          isJson = true;
+        }
+      } catch {}
+      return { ok: true, data: { text, bytes: buf.length, isJson } };
+    } catch (e) {
+      return { ok: false, error: e && e.message || String(e) };
+    }
   }
 
 

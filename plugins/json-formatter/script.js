@@ -47,9 +47,34 @@
   }
 
   function parseOrRepair(text) {
-    try { return JSON.parse(text); } catch (e) {
-      const repaired = repairToStrictJSON(text);
-      return JSON.parse(repaired);
+    const raw = String(text || '');
+    // 1) 严格解析
+    try {
+      return JSON.parse(raw);
+    } catch (e1) {
+      // 2) 宽松修复后解析（单引号、结尾逗号等）
+      try {
+        const repaired = repairToStrictJSON(raw);
+        return JSON.parse(repaired);
+      } catch (e2) {
+        // 3) 兼容形如 {\"key\":\"val\"} 的输入：先按 JSON 字符串解码，再二次解析
+        try {
+          const wrapped = '"' + raw.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+          const unescaped = JSON.parse(wrapped);
+          return JSON.parse(unescaped);
+        } catch (e3) {
+          // 4) 如果文本中所有引号都被转义（不存在未转义的 \" 之外的引号），尝试仅移除引号前的反斜杠再解析
+          try {
+            const noUnescapedQuotes = !/(^|[^\\])"/.test(raw);
+            if (noUnescapedQuotes && /\\"/.test(raw)) {
+              const dequoted = raw.replace(/\\"/g, '"');
+              return JSON.parse(dequoted);
+            }
+          } catch {}
+          // 保留首个错误信息，便于用户理解
+          throw e1;
+        }
+      }
     }
   }
 

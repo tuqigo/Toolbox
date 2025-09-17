@@ -154,6 +154,8 @@
     let rewriteRules = null;
     try { const rr = (el('rewriteRules') && el('rewriteRules').value.trim()) || ''; if (rr) rewriteRules = JSON.parse(rr); } catch {}
     const maxBodyDirMB = Number(el('maxBodyDirMB') && el('maxBodyDirMB').value) || 512;
+    const inlineLimitKB = Number(el('inlineLimitKB') && el('inlineLimitKB').value) || 50;
+    const maxEntries = Math.max(100, Number(el('maxEntries') && el('maxEntries').value) || 2000);
     // 链式代理：默认关闭；仅当勾选且填写地址时才传
     let upstreamParam = undefined;
     try {
@@ -169,7 +171,7 @@
         }
       }
     } catch {}
-    const payload = { host: '127.0.0.1', port, recordBody:true, maxEntries:2000, targets: targets||null, filters, delayRules, rewriteRules, maxBodyDirMB };
+    const payload = { host: '127.0.0.1', port, recordBody:true, maxEntries, targets: targets||null, filters, delayRules, rewriteRules, maxBodyDirMB, bodyInlineLimitKB: inlineLimitKB };
     if (upstreamParam) payload.upstream = upstreamParam;
     const startRet = await window.MT.invoke('capture.start', payload);
     // 启用全局系统代理
@@ -231,14 +233,7 @@
     el('btnStop').addEventListener('click', stop);
     el('btnRefresh').addEventListener('click', updateStatus);
     // 系统代理开关已集成到开启/关闭按钮
-    el('btnCopyCurl').addEventListener('click', async ()=>{
-      try {
-        if (!selectedId) { toast('请先选择一条请求'); return; }
-        const s = await window.MT.invoke('capture.toCurl', { id: selectedId });
-        await window.MT.clipboard.writeText(s||'');
-        toast('已复制 cURL');
-      } catch (e) { toast('复制失败'); }
-    });
+    // 移除旧的 cURL 复制按钮逻辑（仅保留 PS 版本）
     el('btnCopyCurlPS').addEventListener('click', async ()=>{
       try {
         if (!selectedId) { toast('请先选择一条请求'); return; }
@@ -250,7 +245,8 @@
     el('btnReplay').addEventListener('click', async ()=>{
       try {
         if (!selectedId) { toast('请先选择一条请求'); return; }
-        const viaSel = document.getElementById('replayRoute');
+        const upEnabled = el('enableUpstream') ? !!el('enableUpstream').checked : false;
+        const viaSel = upEnabled ? document.getElementById('replayRoute') : null;
         const via = viaSel ? (viaSel.value || 'direct') : 'direct';
         const r = await window.MT.invoke('capture.replay', { id: selectedId, followRedirects: true, via });
         const data = (r && r.data) ? r.data : r; // invoke 会在 ok=true 时直接返回 data
@@ -270,6 +266,16 @@
           toast('重放失败');
         }
       } catch (e) { toast('重放失败'); }
+    });
+    const btnCopyRespBody = el('btnCopyRespBody');
+    if (btnCopyRespBody) btnCopyRespBody.addEventListener('click', async ()=>{
+      try {
+        if (!selectedId) { toast('请先选择一条请求'); return; }
+        const r = await window.MT.invoke('capture.getBody', { id: selectedId, which: 'resp', prettyJson: true });
+        const data = (r && r.data) ? r.data : r;
+        await window.MT.clipboard.writeText((data && data.text) || '');
+        toast('已复制响应Body');
+      } catch (e) { toast('复制失败'); }
     });
     el('btnClear').addEventListener('click', clearAll);
     el('btnExport').addEventListener('click', exportHar);
@@ -291,11 +297,10 @@
         statusEl.className = 'pill';
         btnEl.disabled = true;
         
-        // 获取当前上游地址配置
-        const enableUpstream = el('enableUpstream') ? !!el('enableUpstream').checked : false;
+        // 获取当前上游地址配置（不依赖勾选，只要填写就允许测试）
         const addrRaw = (el('upstreamAddr') && el('upstreamAddr').value || '').trim();
-        if (!enableUpstream || !addrRaw) {
-          statusEl.textContent = '已禁用';
+        if (!addrRaw) {
+          statusEl.textContent = '请输入地址';
           statusEl.className = 'pill bad';
           btnEl.disabled = false;
           return;
@@ -323,15 +328,15 @@
           upstream: upstreamAddr,
           testUrl: selectedTestUrl
         });
-        
+        const rr = (ret && ret.data) ? ret.data : ret;
         // 添加调试日志
-        try { console.log('[HTTP-SNIFFER] test result:', JSON.stringify(ret, null, 2)); } catch {}
+        try { console.log('[HTTP-SNIFFER] test result:', JSON.stringify(rr, null, 2)); } catch {}
         
-        if (ret && ret.ok) {
+        if (rr && rr.ok) {
           statusEl.textContent = '连通正常';
           statusEl.className = 'pill ok';
-          const duration = ret.details && ret.details.duration;
-          const upstream = ret.details && ret.details.upstream;
+          const duration = rr.details && rr.details.duration;
+          const upstream = rr.details && rr.details.upstream;
           if (duration && upstream) {
             toast(`✓ 连通性测试成功！\n响应时间: ${duration}ms\n代理地址: ${upstream}\n测试端点: ${urlLabel}`);
           } else if (duration) {
@@ -342,8 +347,8 @@
         } else {
           statusEl.textContent = '连接失败';
           statusEl.className = 'pill bad';
-          const error = (ret && ret.error) || '未知错误';
-          const details = ret && ret.details;
+          const error = (rr && rr.error) || '未知错误';
+          const details = rr && rr.details;
           let detailMsg = '';
           if (details) {
             const upstream = details.upstream;
@@ -424,20 +429,20 @@
       if (upChk && upAddr) {
         const sync = () => { 
           const enabled = upChk.checked;
-          upAddr.disabled = !enabled; 
-          upTestBtn.disabled = !enabled;
-          if (testUrlSelect) testUrlSelect.disabled = !enabled;
-          
+          // 不再禁用地址/测试，测试按钮仅依赖是否填写地址
+          if (testUrlSelect) testUrlSelect.disabled = false;
+          if (upTestBtn) upTestBtn.disabled = !(el('upstreamAddr') && el('upstreamAddr').value.trim());
+          // 重放路由选择：仅在勾选链式代理时显示
+          const routeSel = el('replayRoute');
+          if (routeSel) routeSel.style.display = enabled ? '' : 'none';
           if (!enabled && upStatus) {
-            upStatus.textContent = '已禁用';
-            upStatus.className = 'pill bad';
-          } else if (enabled && upStatus && upStatus.textContent === '已禁用') {
             upStatus.textContent = '未测试';
             upStatus.className = 'pill';
           }
         };
         upChk.addEventListener('change', async ()=>{ sync(); await syncSystemUpstreamState(); });
         syncSystemUpstreamState();
+        sync();
       }
       
       // 监听代理地址和测试URL变化，重置测试状态
@@ -448,7 +453,7 @@
         }
       };
       
-      if (upAddr) upAddr.addEventListener('input', async ()=>{ resetTestStatus(); await syncSystemUpstreamState(); });
+      if (upAddr) upAddr.addEventListener('input', async ()=>{ resetTestStatus(); await syncSystemUpstreamState(); if (upTestBtn) upTestBtn.disabled = !(el('upstreamAddr') && el('upstreamAddr').value.trim()); });
       if (testUrlSelect) testUrlSelect.addEventListener('change', resetTestStatus);
     } catch {}
     
@@ -492,12 +497,8 @@
           sysOn = !!(st && st.proxyState && st.proxyState.enable === 1);
         } catch {}
         if (!sysOn) {
-          // 系统代理未启用：强制关闭链式代理勾选并禁用相关控件
-          upChk.checked = false;
+          // 系统代理未启用：仅提示，不禁用地址与测试按钮
           try {
-            upAddr.disabled = true;
-            if (upTestBtn) upTestBtn.disabled = true;
-            if (testUrlSelect) testUrlSelect.disabled = true;
             if (upStatus) { upStatus.textContent = '系统未启用'; upStatus.className = 'pill bad'; }
           } catch {}
         }
@@ -513,8 +514,10 @@
       const pathPrefixes = (el('capPrefix') && el('capPrefix').value.trim()) || '';
       const rewriteRules = (el('rewriteRules') && el('rewriteRules').value) || '';
       const maxBodyDirMB = Number(el('maxBodyDirMB') && el('maxBodyDirMB').value) || 512;
+      const inlineLimitKB = Number(el('inlineLimitKB') && el('inlineLimitKB').value) || 50;
+      const maxEntries = Math.max(100, Number(el('maxEntries') && el('maxEntries').value) || 2000);
       // 注意：enableUpstream / upstreamAddr 为系统判定项，不入库
-      const settings = { targets, pathPrefixes, rewriteRules, maxBodyDirMB };
+      const settings = { targets, pathPrefixes, rewriteRules, maxBodyDirMB, inlineLimitKB, maxEntries };
       await window.MT.db.put('http-sniffer.settings', settings);
     } catch (e) { try { console.warn('[HTTP-SNIFFER] saveSettings failed', e && e.message); } catch {} }
   }
@@ -529,6 +532,8 @@
         if (val.pathPrefixes != null && el('capPrefix')) el('capPrefix').value = String(val.pathPrefixes || '');
         if (val.rewriteRules != null && el('rewriteRules')) el('rewriteRules').value = String(val.rewriteRules || '');
         if (val.maxBodyDirMB != null && el('maxBodyDirMB')) el('maxBodyDirMB').value = String(val.maxBodyDirMB || '512');
+        if (val.inlineLimitKB != null && el('inlineLimitKB')) el('inlineLimitKB').value = String(val.inlineLimitKB || '50');
+        if (val.maxEntries != null && el('maxEntries')) el('maxEntries').value = String(val.maxEntries || '2000');
         return true;
       }
       return false;
