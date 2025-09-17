@@ -1,7 +1,7 @@
 {
   "name": "OCR识别",
   "description": "离线,打开即识别",
-  "logo": "🧾",
+  "logo": "icon.png",
   "instance": "multi",
   "window": { "width": 1000, "height": 700, "resizable": true, "hideOnBlur": false },
   "features": [

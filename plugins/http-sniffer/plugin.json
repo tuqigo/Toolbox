@@ -4,7 +4,7 @@
   "description": "启动/停止本地 HTTP(S) 代理，抓取并过滤请求，支持证书安装与 HAR 导出",
   "version": "0.1.0",
   "author": "MiniToolbox Team",
-  "icon": "🕵️",
+  "logo": "icon.png",
   "instance": "single",
   "window": {
     "width": 980,

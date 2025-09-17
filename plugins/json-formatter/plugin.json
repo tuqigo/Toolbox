@@ -1,7 +1,7 @@
 {
   "name": "JSON 格式化",
   "description": "格式化与校验 JSON，支持复制",
-  "logo": "🔧",
+  "logo": "icon.png",
   "instance": "multi",
   "window": {
     "hideOnBlur": false,

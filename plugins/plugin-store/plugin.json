@@ -3,7 +3,7 @@
   "description": "浏览、搜索、安装和管理插件",
   "version": "1.0.0",
   "author": "MiniToolbox Team",
-  "logo": "🏪",
+  "logo": "icon.png",
   "instance": "single",
   "window": {
     "width": 1000,

@@ -1,7 +1,7 @@
 {
   "name": "Mermaid 图表查看器",
   "description": "渲染和显示Mermaid语法图表",
-  "logo": "🔧",
+  "logo": "icon.png",
   "window": { 
     "width": 1000, 
     "height": 700, 

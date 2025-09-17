@@ -1,7 +1,7 @@
 {
   "name": "书签搜索",
   "description": "示例：search 模式的书签搜索插件",
-  "logo": "🔖",
+  "logo": "icon.png",
   "mode": "list",
   "features": [
     {

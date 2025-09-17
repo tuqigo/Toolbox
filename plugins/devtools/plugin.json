@@ -3,7 +3,7 @@
   "description": "本地挂载/运行插件，暂停与打包 .mtpkg",
   "version": "1.0.0",
   "author": "MiniToolbox Team",
-  "logo": "🧰",
+  "logo": "icon.png",
   "instance": "single",
   "window": {
     "width": 840,

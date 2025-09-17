@@ -4,7 +4,7 @@
   "description": "管理 MiniToolbox 的各项配置设置",
   "version": "1.0.0",
   "author": "MiniToolbox Team",
-  "icon": "⚙️",
+  "logo": "icon.png",
   "instance": "single",
   "window": {
     "width": 800,
