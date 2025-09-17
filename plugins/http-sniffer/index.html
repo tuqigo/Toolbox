@@ -33,12 +33,13 @@
     * { box-sizing: border-box; }
     body { margin: 0; font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial, PingFang SC, Microsoft Yahei, sans-serif; background: var(--bg); color: var(--fg); }
     .appbar { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel-2); position: sticky; top: 0; z-index: 2; }
-    .toast { position: fixed; right: 16px; bottom: 16px; background: var(--panel); border: 1px solid var(--border); color: var(--fg); padding: 10px 12px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.35); display: none; z-index: 9; }
+    .toast { position: fixed; right: 16px; bottom: 16px; background: var(--panel); border: 1px solid var(--border); color: var(--fg); padding: 10px 12px; border-radius: 8px; box-shadow: var(--shadow-overlay); display: none; z-index: 9; }
     .toast.show { display: block; animation: fade .2s ease; }
     @keyframes fade { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: translateY(0);} }
     ::-webkit-scrollbar { width: 10px; height: 10px; }
-    ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 6px; border: 2px solid var(--bg); }
-    ::-webkit-scrollbar-track { background: var(--panel-2); }
+    ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 6px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+    ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
     .appbar .title { font-weight: 600; letter-spacing: 0.2px; }
     .pill { padding: 4px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); }
     .pill.ok { background: rgba(60,200,107,0.12); color: var(--ok); border-color: rgba(60,200,107,0.28); }
@@ -71,22 +72,48 @@
   </script>
   <script>
     (async function(){
-      function applyTheme(effective){
-        const root = document.documentElement;
-        if (effective === 'dark'){
-          root.setAttribute('data-theme', '');
-        } else {
-          root.setAttribute('data-theme', 'light');
-        }
-      }
       try {
-        const themeInfo = await window.MT.invoke('ui.getTheme');
-        const eff = (themeInfo && themeInfo.effective) || 'light';
-        applyTheme(eff);
+        const info = await window.MT.invoke('ui.getTheme');
+        const eff = (info && (info.effective || (info.data && info.data.effective))) || 'light';
+        const tokens = (info && (info.tokens || (info.data && info.data.tokens))) || null;
+        const root = document.documentElement;
+        // data-theme 仅作少量分支使用
+        root.setAttribute('data-theme', eff === 'dark' ? '' : 'light');
+        function resolve(val, scope) {
+          if (typeof val === 'string' && /^\{.+\}$/.test(val)) {
+            const path = val.slice(1, -1).split('.');
+            let cur = scope;
+            for (const seg of path) { cur = cur && cur[seg]; }
+            return resolve(cur, scope);
+          }
+          return val;
+        }
+        if (tokens) {
+          const t = tokens[eff] || tokens.light;
+          const c = t && t.color || {};
+          const comp = t && t.component || {};
+          const sb = comp.scrollbar || {};
+          // 映射到本插件既有变量命名
+          root.style.setProperty('--bg', resolve(c.bg, t));
+          root.style.setProperty('--panel', resolve(c.panel, t));
+          root.style.setProperty('--panel-2', resolve(c.panel2 || c.panel, t));
+          root.style.setProperty('--fg', resolve(c.fg, t));
+          root.style.setProperty('--muted', resolve(c.muted || '#6c757d', t));
+          root.style.setProperty('--border', resolve(c.border, t));
+          root.style.setProperty('--primary', resolve(c.primary, t));
+          root.style.setProperty('--ok', resolve(c.ok || '#3cc86b', t));
+          root.style.setProperty('--warn', resolve(c.warn || '#ffb86c', t));
+          root.style.setProperty('--bad', resolve(c.bad || '#dc3545', t));
+          // 滚动条 tokens
+          root.style.setProperty('--scrollbar-track', resolve(sb.track || 'transparent', t));
+          root.style.setProperty('--scrollbar-thumb', resolve(sb.thumb || '#999', t));
+          root.style.setProperty('--scrollbar-thumb-hover', resolve(sb.thumbHover || '#aaa', t));
+          // 阴影（elevation）
+          const elev = t && t.elevation || {};
+          root.style.setProperty('--shadow-surface', resolve(elev.surface || '0 6px 20px rgba(0,0,0,0.12)', t));
+          root.style.setProperty('--shadow-overlay', resolve(elev.overlay || '0 8px 24px rgba(0,0,0,0.12)', t));
+        }
       } catch {}
-      window.addEventListener('mt-theme-change', (ev)=>{
-        try { applyTheme((ev && ev.detail && ev.detail.effective) || 'light'); } catch {}
-      });
     })();
   </script>
 </head>
