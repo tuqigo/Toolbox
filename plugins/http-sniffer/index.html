@@ -31,8 +31,17 @@
       --bad: #dc3545;
     }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial, PingFang SC, Microsoft Yahei, sans-serif; background: var(--bg); color: var(--fg); }
-    .appbar { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel-2); position: sticky; top: 0; z-index: 2; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      margin: 0;
+      font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial, PingFang SC, Microsoft Yahei, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+    }
+    .appbar { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel-2); position: sticky; top: 0; z-index: 2; flex: 0 0 auto; }
     .toast { position: fixed; right: 16px; bottom: 16px; background: var(--panel); border: 1px solid var(--border); color: var(--fg); padding: 10px 12px; border-radius: 8px; box-shadow: var(--shadow-overlay); display: none; z-index: 9; }
     .toast.show { display: block; animation: fade .2s ease; }
     @keyframes fade { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: translateY(0);} }
@@ -49,21 +58,22 @@
     .btn:hover { border-color: var(--primary); background: var(--panel-2); }
     .btn.primary { background: var(--primary); border-color: var(--primary); color: white; }
     .btn.primary:hover { opacity: 0.9; }
-    .toolbar { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
+    .toolbar { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel-2); flex: 0 0 auto; }
     .group { display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--border); padding: 8px; border-radius: 10px; }
     .group label { font-size: 12px; color: var(--muted); }
     .input, .select { height: 30px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); padding: 0 10px; outline: none; }
     .input::placeholder { color: var(--muted); }
     .input:focus, .select:focus { border-color: var(--primary); }
-    .main { display: grid; grid-template-columns: 1.1fr 0.9fr; height: calc(100vh - 120px); }
-    .list { overflow: auto; border-right: 1px solid var(--border); background: var(--panel); }
+    /* main 改为弹性伸缩，避免 calc(100vh-...) 计算误差导致溢出 */
+    .main { display: grid; grid-template-columns: 1.1fr 0.9fr; flex: 1 1 auto; min-height: 0; height: auto; }
+    .list { overflow: auto; border-right: 1px solid var(--border); background: var(--panel); min-height: 0; }
     table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
     thead th { position: sticky; top: 0; background: var(--panel-2); border-bottom: 1px solid var(--border); text-align: left; padding: 10px 10px; font-weight: 600; color: var(--muted); }
     tbody td { padding: 9px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
     tbody tr:hover { background: var(--panel-2); }
     .status-err { color: var(--bad); }
     .status-ok { color: var(--ok); }
-    .detail { overflow: hidden; padding: 12px; background: var(--panel); display: flex; flex-direction: column; }
+    .detail { overflow: hidden; padding: 12px; background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
     .note { color: var(--warn); margin-bottom: 8px; }
     .kv { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; background: var(--panel-2); border: 1px solid var(--border); padding: 10px; border-radius: 8px; }
     #detailBox { overflow: auto; flex: 1 1 auto; min-height: 0; }
