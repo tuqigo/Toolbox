@@ -56,7 +56,7 @@
     .input:focus, .select:focus { border-color: var(--primary); }
     .main { display: grid; grid-template-columns: 1.1fr 0.9fr; height: calc(100vh - 120px); }
     .list { overflow: auto; border-right: 1px solid var(--border); background: var(--panel); }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
     thead th { position: sticky; top: 0; background: var(--panel-2); border-bottom: 1px solid var(--border); text-align: left; padding: 10px 10px; font-weight: 600; color: var(--muted); }
     tbody td { padding: 9px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
     tbody tr:hover { background: var(--panel-2); }

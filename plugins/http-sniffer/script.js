@@ -74,7 +74,7 @@
     if (needFull) {
       const rows = items.map(it => {
         const cls = (Number(it.status)>=400)?' style="color:#ff7b72"':'';
-        return `<tr data-id="${it.id}"><td>${fmtTime(it.tsStart)}</td><td>${it.method}</td><td>${it.host}</td><td title="${it.path}">${it.path}</td><td${cls}>${it.status||''}</td><td>${it.duration||''}</td></tr>`;
+        return `<tr data-id="${it.id}"><td>${fmtTime(it.tsStart)}</td><td title="${it.method}">${it.method}</td><td>${it.host}</td><td title="${it.path}">${it.path}</td><td${cls}>${it.status||''}</td><td>${it.duration||''}</td></tr>`;
       }).join('');
       tb.innerHTML = rows;
       lastItems = items;
@@ -87,7 +87,7 @@
     if (idx < 0 || Math.abs(items.length - lastItems.length) > 50) {
       const rows = items.map(it => {
         const cls = (Number(it.status)>=400)?' style="color:#ff7b72"':'';
-        return `<tr data-id="${it.id}"><td>${fmtTime(it.tsStart)}</td><td>${it.method}</td><td>${it.host}</td><td title="${it.path}">${it.path}</td><td${cls}>${it.status||''}</td><td>${it.duration||''}</td></tr>`;
+        return `<tr data-id="${it.id}"><td>${fmtTime(it.tsStart)}</td><td title="${it.method}">${it.method}</td><td>${it.host}</td><td title="${it.path}">${it.path}</td><td${cls}>${it.status||''}</td><td>${it.duration||''}</td></tr>`;
       }).join('');
       tb.innerHTML = rows;
       lastItems = items;
@@ -101,7 +101,7 @@
         const tr = document.createElement('tr');
         tr.setAttribute('data-id', String(it.id));
         const cls = (Number(it.status)>=400)?' style="color:#ff7b72"':'';
-        tr.innerHTML = `<td>${fmtTime(it.tsStart)}</td><td>${it.method}</td><td>${it.host}</td><td title="${it.path}">${it.path}</td><td${cls}>${it.status||''}</td><td>${it.duration||''}</td>`;
+        tr.innerHTML = `<td>${fmtTime(it.tsStart)}</td><td title="${it.method}">${it.method}</td><td>${it.host}</td><td title="${it.path}">${it.path}</td><td${cls}>${it.status||''}</td><td>${it.duration||''}</td>`;
         frag.appendChild(tr);
       }
       tb.insertBefore(frag, tb.firstChild);
@@ -114,7 +114,7 @@
     if (tb.children.length < items.length) {
       const rows = items.map(it => {
         const cls = (Number(it.status)>=400)?' style="color:#ff7b72"':'';
-        return `<tr data-id="${it.id}"><td>${fmtTime(it.tsStart)}</td><td>${it.method}</td><td>${it.host}</td><td title="${it.path}">${it.path}</td><td${cls}>${it.status||''}</td><td>${it.duration||''}</td></tr>`;
+        return `<tr data-id="${it.id}"><td>${fmtTime(it.tsStart)}</td><td title="${it.method}">${it.method}</td><td>${it.host}</td><td title="${it.path}">${it.path}</td><td${cls}>${it.status||''}</td><td>${it.duration||''}</td></tr>`;
       }).join('');
       tb.innerHTML = rows;
     }

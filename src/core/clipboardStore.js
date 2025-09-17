@@ -16,7 +16,39 @@ class ClipboardStore {
     try {
       if (await fs.pathExists(this.filePath)) {
         const data = JSON.parse(await fs.readFile(this.filePath, 'utf8'));
-        if (Array.isArray(data.items)) this.items = data.items;
+        if (Array.isArray(data.items)) {
+          this.items = data.items;
+          // 兼容旧数据：将 JSON 文本压缩为单行，并补充缺失的 type
+          let changed = false;
+          for (const item of this.items) {
+            try {
+              const raw = (item && item.text) ? String(item.text) : '';
+              const t = raw.trim();
+              if (!t) continue;
+              const type = item.type || this.detectType(t);
+              if (type === 'json') {
+                try {
+                  const parsed = JSON.parse(t);
+                  const minified = JSON.stringify(parsed);
+                  if (minified && minified !== t) {
+                    item.text = minified;
+                    changed = true;
+                  }
+                  item.type = 'json';
+                } catch {}
+              } else if (!item.type) {
+                item.type = type;
+                changed = true;
+              }
+            } catch {}
+          }
+          if (changed) {
+            if (!this.isQuiet) {
+              try { console.log('ClipboardStore: 已对历史 JSON 项进行单行化并补齐类型'); } catch {}
+            }
+            await this.save();
+          }
+        }
       }
       this.loaded = true;
     } catch (e) {
@@ -52,7 +84,24 @@ class ClipboardStore {
     if (!t) return false;
     // 与最新一条重复则跳过
     if (this.items.length > 0 && this.items[0].text === t) return false;
-    const item = { id: this.makeId(), text: t, type: this.detectType(t), createdAt: Date.now() };
+    // 规范化文本：若为 JSON，则压缩为单行
+    let normalizedText = t;
+    let detectedType = this.detectType(t);
+    if (detectedType === 'json') {
+      try {
+        const parsed = JSON.parse(t);
+        const minified = JSON.stringify(parsed);
+        if (minified && minified !== t) {
+          if (!this.isQuiet) {
+            try { console.log(`ClipboardStore: JSON normalized ${t.length} -> ${minified.length}`); } catch {}
+          }
+          normalizedText = minified;
+        }
+      } catch (e) {
+        // JSON 解析失败则保持原样
+      }
+    }
+    const item = { id: this.makeId(), text: normalizedText, type: detectedType, createdAt: Date.now() };
     this.items.unshift(item);
     if (this.items.length > this.maxItems) this.items.length = this.maxItems;
     await this.save();

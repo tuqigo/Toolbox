@@ -70,6 +70,6 @@ alwaysApply: true
 
 
 ## 主题策略 
-- 有页面的插件要做暗黑和明两种主题适配  window.MT.invoke('ui.getTheme') 可以拿到当前主题 
+- 有页面的插件要做暗黑和明两种主题适配  window.MT.invoke('ui.getTheme') 可以拿到当前主题 ，tooltip 的纵/横滚动条与轨道均接入主题变量
 - 要求你画图的时候使用mermaid语法
 - 插件内所有的通知在右下角 3秒显示自动隐藏
