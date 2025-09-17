@@ -184,6 +184,7 @@
       const icon = qs('icon') || '🔧';
       const iconUrl = qs('iconUrl');
       const isDev = qs('dev') === '1';
+      const isResizable = qs('resizable') !== '0';
       document.getElementById('title').textContent = name;
       const iconEl = document.getElementById('icon');
       if (iconUrl) {
@@ -214,6 +215,9 @@
       const maxEl = document.getElementById('tnMax');
       const maximizeIcon = maxEl.querySelector('.maximize-icon');
       const restoreIcon = maxEl.querySelector('.restore-icon');
+      if (!isResizable) {
+        maxEl.style.display = 'none';
+      }
       let isMaximized = false;
       const updateMaxIcon = (maximized) => {
         isMaximized = maximized;
@@ -229,10 +233,12 @@
           maxEl.title = '最大化';
         }
       };
-      maxEl.addEventListener('click', () => safe(() => {
-        window.MTChrome.win(id, instanceId, 'toggle-maximize');
-        updateMaxIcon(!isMaximized);
-      }));
+      if (isResizable) {
+        maxEl.addEventListener('click', () => safe(() => {
+          window.MTChrome.win(id, instanceId, 'toggle-maximize');
+          updateMaxIcon(!isMaximized);
+        }));
+      }
 
       document.getElementById('tnClose').addEventListener('click', () => safe(() => { window.MTChrome.win(id, instanceId, 'close'); }));
 

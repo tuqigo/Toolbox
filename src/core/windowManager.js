@@ -44,7 +44,9 @@ class WindowManager {
         const win = this.windows.get(existingKey);
         if (win && !win.isDestroyed()) {
           if (targetScreen) {
-            this.centerWindowOnScreen(win, targetScreen);
+            try {
+              this.positionWindowByConfig(win, pluginMeta.window || {}, targetScreen);
+            } catch { this.centerWindowOnScreen(win, targetScreen); }
           }
           win.show();
           win.focus();
@@ -67,6 +69,7 @@ class WindowManager {
       frame: false,
       autoHideMenuBar: true,
       resizable: cfg.resizable !== false,
+      maximizable: cfg.resizable !== false,
       webPreferences: {
         contextIsolation: true,
         sandbox: true,
@@ -81,14 +84,11 @@ class WindowManager {
       }
     };
 
-    // 如果指定了目标屏幕，在该屏幕上创建窗口
-    if (targetScreen) {
-      const { bounds } = targetScreen;
-      const x = Math.round(bounds.x + (bounds.width - windowOptions.width) / 2);
-      const y = Math.round(bounds.y + (bounds.height - windowOptions.height) / 2);
-      windowOptions.x = x;
-      windowOptions.y = y;
-    }
+    // 计算初始位置（基于 workArea，考虑任务栏）
+    try {
+      const computed = this.computePositionByConfig(cfg, targetScreen, { width: windowOptions.width, height: windowOptions.height });
+      if (computed) { windowOptions.x = computed.x; windowOptions.y = computed.y; }
+    } catch {}
 
     // 注入实例参数
     if (Array.isArray(windowOptions.webPreferences.additionalArguments)) {
@@ -191,6 +191,7 @@ class WindowManager {
       url.searchParams.set('icon', pluginMeta.icon || '🔧');
       try { if (pluginMeta.iconUrl) url.searchParams.set('iconUrl', pluginMeta.iconUrl); } catch {}
       url.searchParams.set('theme', this.defaultTheme);
+      try { url.searchParams.set('resizable', windowOptions.resizable ? '1' : '0'); } catch {}
       await view.webContents.loadURL(url.toString());
       // 存储引用
       win.__mtChromeView = view;
@@ -361,17 +362,80 @@ class WindowManager {
     } catch {}
   }
 
-  // 在指定屏幕上居中显示窗口
+  // 在指定屏幕上居中显示窗口（基于 workArea，考虑任务栏）
   centerWindowOnScreen(window, display) {
     if (!window || !display || window.isDestroyed()) return;
-    
-    const windowBounds = window.getBounds();
-    const { bounds } = display;
-    
-    const x = Math.round(bounds.x + (bounds.width - windowBounds.width) / 2);
-    const y = Math.round(bounds.y + (bounds.height - windowBounds.height) / 2);
-    
-    window.setPosition(x, y);
+    try {
+      const b = window.getBounds();
+      const computed = this.computePositionByConfig({ position: 'center', edgeMargin: 0 }, display, { width: b.width, height: b.height });
+      if (computed) window.setPosition(computed.x, computed.y);
+    } catch {}
+  }
+
+  // 计算指定配置与屏幕上的目标窗口位置（基于 workArea，考虑任务栏）
+  computePositionByConfig(cfg, display, size) {
+    try {
+      const { screen } = require('electron');
+      const disp = display || (screen && screen.getPrimaryDisplay && screen.getPrimaryDisplay());
+      if (!disp) return null;
+      const area = disp.workArea || disp.bounds;
+      const work = { x: area.x || 0, y: area.y || 0, width: area.width, height: area.height };
+      const wndW = Math.max(0, (size && size.width) || 0);
+      const wndH = Math.max(0, (size && size.height) || 0);
+      const edgeMargin = Math.max(0, Math.floor(Number((cfg && cfg.edgeMargin) || 0)));
+
+      const normalizePosition = (p) => {
+        const s = String((cfg && cfg.position) || p || 'center').toLowerCase();
+        const map = {
+          'center': 'center',
+          'top-left': 'top-left', 'tl': 'top-left', '左上': 'top-left', '左上角': 'top-left',
+          'top-right': 'top-right', 'tr': 'top-right', '右上': 'top-right', '右上角': 'top-right',
+          'bottom-left': 'bottom-left', 'bl': 'bottom-left', '左下': 'bottom-left', '左下角': 'bottom-left',
+          'bottom-right': 'bottom-right', 'br': 'bottom-right', '右下': 'bottom-right', '右下角': 'bottom-right'
+        };
+        return map[s] || 'center';
+      };
+
+      const pos = normalizePosition((cfg && cfg.position) || 'center');
+      let x = work.x + Math.max(0, Math.floor((work.width - wndW) / 2));
+      let y = work.y + Math.max(0, Math.floor((work.height - wndH) / 2));
+      if (pos === 'top-left') {
+        x = work.x + edgeMargin;
+        y = work.y + edgeMargin;
+      } else if (pos === 'top-right') {
+        x = work.x + Math.max(0, work.width - wndW - edgeMargin);
+        y = work.y + edgeMargin;
+      } else if (pos === 'bottom-left') {
+        x = work.x + edgeMargin;
+        y = work.y + Math.max(0, work.height - wndH - edgeMargin);
+      } else if (pos === 'bottom-right') {
+        x = work.x + Math.max(0, work.width - wndW - edgeMargin);
+        y = work.y + Math.max(0, work.height - wndH - edgeMargin);
+      }
+      // 夹紧在工作区域内，避免越界
+      x = Math.min(Math.max(work.x, x), work.x + Math.max(0, work.width - wndW));
+      y = Math.min(Math.max(work.y, y), work.y + Math.max(0, work.height - wndH));
+      return { x: Math.round(x), y: Math.round(y) };
+    } catch { return null; }
+  }
+
+  // 按插件 window 配置定位已存在窗口（支持 position 与 edgeMargin；基于 workArea）
+  positionWindowByConfig(window, cfg, display) {
+    try {
+      if (!window || window.isDestroyed()) return;
+      const b = window.getBounds();
+      const computed = this.computePositionByConfig(cfg, (function(){
+        try {
+          const { screen } = require('electron');
+          if (!display && screen && screen.getDisplayNearestPoint) {
+            const center = { x: b.x + Math.floor(b.width / 2), y: b.y + Math.floor(b.height / 2) };
+            return screen.getDisplayNearestPoint(center);
+          }
+        } catch {}
+        return display;
+      })(), { width: Math.max(0, b.width), height: Math.max(0, b.height) });
+      if (computed) window.setPosition(computed.x, computed.y);
+    } catch {}
   }
 }
 
