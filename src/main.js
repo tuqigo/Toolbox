@@ -857,6 +857,7 @@ class MiniToolbox {
       try {
         const isHttps = String(reqOptions.protocol || '').toLowerCase().startsWith('https') || (!reqOptions.protocol && reqOptions.port === 443);
         const mod = isHttps ? require('https') : require('http');
+        const zlib = require('zlib');
         const options = {
           hostname: reqOptions.hostname,
           port: reqOptions.port || (isHttps ? 443 : 80),
@@ -869,21 +870,32 @@ class MiniToolbox {
           const chunks = [];
           res.on('data', (d) => chunks.push(Buffer.from(d)));
           res.on('end', () => {
-            const buf = Buffer.concat(chunks);
-            resolve({ ok: true, status: res.statusCode, headers: res.headers, data: buf.toString('utf8') });
+            let buf = Buffer.concat(chunks);
+            try {
+              const encHeader = res.headers && (res.headers['content-encoding'] || res.headers['Content-Encoding']);
+              const ce = String(encHeader || '').toLowerCase();
+              if (ce.includes('br') && typeof zlib.brotliDecompressSync === 'function') {
+                try { buf = zlib.brotliDecompressSync(buf); } catch {}
+              } else if (ce.includes('gzip')) {
+                try { buf = zlib.gunzipSync(buf); } catch {}
+              } else if (ce.includes('deflate')) {
+                try { buf = zlib.inflateSync(buf); } catch { try { buf = zlib.inflateRawSync(buf); } catch {} }
+              }
+            } catch {}
+            resolve({ status: res.statusCode, headers: res.headers, data: buf.toString('utf8') });
           });
         });
 
-        req.on('error', (err) => resolve({ ok: false, error: err.message }));
+        req.on('error', (err) => resolve({ status: 0, headers: {}, data: `ERROR: ${err.message}` }));
 
         if (reqOptions.body) {
           const bodyStr = typeof reqOptions.body === 'string' ? reqOptions.body : JSON.stringify(reqOptions.body);
-          if (!options.headers['Content-Type'] && !options.headers['content-type']) req.setHeader('Content-Type', 'application/json');
+          try { req.setHeader('Content-Length', Buffer.byteLength(bodyStr)); } catch {}
           req.write(bodyStr);
         }
         req.end();
       } catch (e) {
-        resolve({ ok: false, error: e.message });
+        resolve({ status: 0, headers: {}, data: `ERROR: ${e.message}` });
       }
     });
   }
@@ -924,8 +936,14 @@ class MiniToolbox {
           case 'openExternal':
             await shell.openExternal(String(payload || ''));
             return { ok: true };
-          case 'net.request':
-            return await this.performRequest(payload);
+          case 'net.request': {
+            try {
+              const r = await this.performRequest(payload);
+              return { ok: true, data: r };
+            } catch (e) {
+              return { ok: false, error: e && e.message || String(e) };
+            }
+          }
           // 抓包代理控制通道（仅主进程托管，插件 UI 通过此网关调用）
           case 'capture.start':
             try { const ret = await this.captureProxy.start(payload || {}); return { ok: true, data: ret }; } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
