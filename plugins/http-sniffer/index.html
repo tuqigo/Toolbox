@@ -74,8 +74,11 @@
     .status-err { color: var(--bad); }
     .status-ok { color: var(--ok); }
     .detail { overflow: hidden; padding: 12px; background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
-    .note { color: var(--warn); margin-bottom: 8px; }
     .kv { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; background: var(--panel-2); border: 1px solid var(--border); padding: 10px; border-radius: 8px; }
+    .kv input, .kv textarea { font-family: inherit; font-size: inherit; color: var(--fg); background: transparent; border: none; outline: none; width: 100%; }
+    .kv textarea { resize: vertical; }
+    .nowrap-ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .muted { color: var(--muted); }
     #detailBox { overflow: auto; flex: 1 1 auto; min-height: 0; }
   </style>
   <script>
@@ -170,6 +173,10 @@
     </div>
     <div class="group">
       <button id="btnClear" class="btn">清空</button>
+      <button id="btnFavList" class="btn" title="查看收藏列表" aria-label="收藏列表">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+        <span class="btn-text">收藏列表</span>
+      </button>
     </div>
   </div>
   <div class="main">
@@ -187,7 +194,6 @@
       </table>
     </div>
     <div class="detail">
-      <div class="note">提示：HTTPS 抓包需要安装并信任自签根证书，仅在你明确授权与合法合规场景下使用。</div>
       <div style="display:flex; gap:8px; margin-bottom:8px;">
         <button id="btnCopyCurlPS" class="btn" title="复制为 PowerShell 友好 cURL">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4h18v2H3V4zm0 7h18v2H3v-2zm0 7h18v2H3v-2z"/></svg>
@@ -204,6 +210,10 @@
         <button id="btnCopyRespBody" class="btn" title="复制完整 Response Body">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v12h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14l4-4h9c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2z"/></svg>
           <span class="btn-text">复制Body</span>
+        </button>
+        <button id="btnFavoriteToggle" class="btn" title="收藏/取消收藏">
+          <svg id="iconFav" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+          <span class="btn-text">收藏</span>
         </button>
       </div>
       <div id="detailBox" class="kv">请选择一条请求...</div>
@@ -258,6 +268,134 @@ Mock响应: [{"action":"mock","match":{"pathPrefix":"/login"},"mock":{"status":2
       <div id="certInfo" class="kv" style="grid-column: span 2; margin-top:8px;">证书信息：-</div>
       <div style="grid-column: span 2; display:flex; justify-content:flex-end; gap:8px;">
         <button id="btnSettingsApply" class="btn primary">应用</button>
+      </div>
+    </div>
+  </div>
+  <!-- 收藏列表面板 -->
+  <div id="favoritesPanel" class="settings-panel" style="display:none; position: fixed; right: 16px; top: 56px; width: 720px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 36px rgba(0,0,0,0.4); z-index: 9;">
+    <div style="display:flex; align-items:center; justify-content: space-between; padding:10px 12px; border-bottom:1px solid var(--border); background: var(--panel-2); border-top-left-radius:10px; border-top-right-radius:10px;">
+      <div style="font-weight:600;">收藏列表</div>
+      <div>
+        <button id="btnFavClose" class="btn">关闭</button>
+      </div>
+    </div>
+    <div style="padding:12px; display:flex; flex-direction: column; gap: 10px;">
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input id="favSearch" class="input" placeholder="搜索 方法/主机/路径/备注" style="flex:1"/>
+        <div id="favCount" class="pill" title="条数">-</div>
+      </div>
+      <div class="kv" style="padding:0; overflow:auto; max-height: 420px;">
+        <table style="width:100%; font-size:12px; border-collapse: collapse;">
+          <thead>
+            <tr style="position:sticky; top:0; background:var(--panel-2);">
+              <th style="text-align:left; padding:8px 10px; width:64px;">方法</th>
+              <th style="text-align:left; padding:8px 10px; width:150px;">主机</th>
+              <th style="text-align:left; padding:8px 10px;">路径</th>
+              <th style="text-align:right; padding:8px 10px; width:96px;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="favTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 请求编辑器面板 -->
+  <div id="reqEditorPanel" class="settings-panel" style="display:none; position: fixed; right: 16px; top: 56px; width: 860px; height: 620px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 36px rgba(0,0,0,0.4); z-index: 10;">
+    <div style="display:flex; align-items:center; justify-content: space-between; padding:10px 12px; border-bottom:1px solid var(--border); background: var(--panel-2); border-top-left-radius:10px; border-top-right-radius:10px;">
+      <div style="font-weight:600;">请求编辑器</div>
+      <div style="display:flex; gap:8px;">
+        <button id="btnEditorSave" class="btn" title="保存收藏">保存</button>
+        <button id="btnEditorSend" class="btn primary" title="发送请求">Send</button>
+        <button id="btnEditorClose" class="btn">关闭</button>
+      </div>
+    </div>
+    <div style="padding:10px; display:flex; flex-direction:column; gap:10px; height: calc(100% - 52px);">
+      <div style="display:flex; gap:8px;">
+        <select id="edMethod" class="select" style="width:100px;">
+          <option>GET</option>
+          <option>POST</option>
+          <option>PUT</option>
+          <option>DELETE</option>
+          <option>PATCH</option>
+          <option>HEAD</option>
+          <option>OPTIONS</option>
+        </select>
+        <input id="edUrl" class="input" placeholder="https://host/path?query" style="flex:1"/>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <input id="edNote" class="input" placeholder="备注 (可选)" style="flex:1"/>
+      </div>
+      <div style="display:flex; gap:8px; border-bottom:1px solid var(--border);">
+        <button class="btn" data-tab="params">Params</button>
+        <button class="btn" data-tab="auth">Authorization</button>
+        <button class="btn" data-tab="headers">Headers</button>
+        <button class="btn" data-tab="cookies">Cookies</button>
+        <button class="btn" data-tab="body">Body</button>
+        <button class="btn" data-tab="response" style="margin-left:auto;">Response</button>
+      </div>
+      <div id="edTabs" style="display:flex; flex:1 1 auto; min-height:0;">
+        <div id="tab-params" style="display:flex; flex-direction:column; gap:8px; width:100%;">
+          <div style="display:flex; justify-content:flex-end;">
+            <button id="btnParamAdd" class="btn">新增行</button>
+          </div>
+          <div id="paramRows" class="kv" style="flex:1 1 auto; min-height:0; overflow:auto;"></div>
+        </div>
+        <div id="tab-auth" style="display:none; flex-direction:column; gap:8px; width:100%;">
+          <div style="display:flex; gap:8px; align-items:center;">
+            <label style="color:var(--muted);">类型</label>
+            <select id="authType" class="select" style="width:160px;">
+              <option value="none">None</option>
+              <option value="bearer">Bearer</option>
+              <option value="basic">Basic</option>
+            </select>
+          </div>
+          <div id="authBearer" style="display:none; gap:8px; align-items:center;">
+            <input id="authBearerToken" class="input" placeholder="Bearer Token 或 JWT" style="width:100%"/>
+          </div>
+          <div id="authBasic" style="display:none; gap:8px; align-items:center;">
+            <input id="authBasicUser" class="input" placeholder="用户名" style="flex:1"/>
+            <input id="authBasicPass" type="password" class="input" placeholder="密码" style="flex:1"/>
+          </div>
+        </div>
+        <div id="tab-headers" style="display:none; flex-direction:column; gap:8px; width:100%;">
+          <div style="display:flex; justify-content:flex-end;">
+            <button id="btnHeaderAdd" class="btn">新增行</button>
+          </div>
+          <div id="headerRows" class="kv" style="flex:1 1 auto; min-height:0; overflow:auto;"></div>
+        </div>
+        <div id="tab-cookies" style="display:none; flex-direction:column; gap:8px; width:100%;">
+          <div style="display:flex; justify-content:flex-end;">
+            <button id="btnCookieAdd" class="btn">新增行</button>
+          </div>
+          <div id="cookieRows" class="kv" style="flex:1 1 auto; min-height:0; overflow:auto;"></div>
+        </div>
+        <div id="tab-body" style="display:none; flex-direction:column; gap:8px; width:100%;">
+          <div style="display:flex; gap:8px; align-items:center;">
+            <label style="color:var(--muted);">类型</label>
+            <select id="bodyType" class="select" style="width:220px;">
+              <option value="none">None</option>
+              <option value="raw">raw</option>
+              <option value="json">json</option>
+              <option value="form">x-www-form-urlencoded</option>
+            </select>
+          </div>
+          <div id="bodyRawBox" style="display:none;">
+            <div class="kv"><textarea id="bodyRaw" style="width:100%; height:180px;" placeholder="请求体" spellcheck="false"></textarea></div>
+          </div>
+          <div id="bodyFormBox" style="display:none;">
+            <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
+              <button id="btnFormAdd" class="btn">新增行</button>
+            </div>
+            <div id="formRows" class="kv" style="max-height:200px; overflow:auto;"></div>
+          </div>
+        </div>
+        <div id="tab-response" style="display:none; flex-direction:column; gap:8px; width:100%;">
+          <div id="respMeta" class="pill">未发送</div>
+          <div class="kv" id="respHeadersBox" style="max-height:160px; overflow:auto;"></div>
+          <div class="kv" id="respCookiesBox" style="max-height:120px; overflow:auto;"></div>
+          <div class="kv" id="respBodyBox" style="flex:1 1 auto; min-height:0; overflow:auto;"></div>
+        </div>
       </div>
     </div>
   </div>

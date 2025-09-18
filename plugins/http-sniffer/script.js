@@ -12,6 +12,8 @@
   let selectedId = null;
   let _cleanupStarted = false;
   let _cleanupDone = false;
+  let lastDetail = null; // 最近一次详情（用于收藏/编辑器）
+  const FAV_COLLECTION = 'http-sniffer.favorites';
 
   function fmtTime(ts){ const d = new Date(ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`; }
 
@@ -125,6 +127,8 @@
     try{
       const data = await window.MT.invoke('capture.detail', { id });
       const r = data || {};
+      lastDetail = r;
+      try { window.__HS_lastDetail = r; } catch {}
       const reqHeaders = JSON.stringify(r.reqHeaders||{}, null, 2);
       const respHeaders = JSON.stringify(r.respHeaders||{}, null, 2);
       const reqBody = r.reqBody || '';
@@ -141,6 +145,8 @@
         '## Response Body', (String(respBody).slice(0, 200000))
       ].join('\n');
       detailBox().textContent = txt;
+      // 刷新收藏星标
+      try { if (window && window.refreshFavIconForDetail) await window.refreshFavIconForDetail(r); } catch {}
     }catch(e){ detailBox().textContent = '加载详情失败: '+(e && e.message); }
   }
 
@@ -479,6 +485,7 @@
       setTimeout(()=>{ t.classList.remove('show'); }, 3200);
     } catch {}
   }
+  try { window.__hsToast = toast; } catch {}
 
   // 同步系统代理状态与“链式代理”控件的一致性
   async function syncSystemUpstreamState(){
@@ -548,6 +555,7 @@
 
   document.addEventListener('DOMContentLoaded', async () => {
     bind();
+    bindFavorites();
     await updateStatus();
     try {
       // 先加载已保存设置并填充输入框
@@ -594,4 +602,460 @@
       cleanupOnce();
     } catch {}
   });
+})();
+
+// =============== 收藏与编辑器逻辑 ===============
+(function(){
+  const el = (id) => document.getElementById(id);
+  const getStyle = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const warnColor = () => getStyle('--warn') || '#fd7e14';
+  const debounce = (fn, wait)=>{ let t=null; return function(){ clearTimeout(t); t=setTimeout(()=>fn.apply(this, arguments), wait); } };
+  const toast = (msg)=>{ try { if (window.__hsToast) return window.__hsToast(msg); } catch {}; try { console.log('[toast]', msg); } catch {} };
+  const FAV_COLLECTION = 'http-sniffer.favorites';
+
+  // ---------- 工具 ----------
+  function parseUrl(url){
+    try { return new URL(url); } catch { return null; }
+  }
+  function ensurePath(p){ try { return p && p.startsWith('/') ? p : ('/' + (p||'')); } catch { return '/' + (p||''); } }
+  function stripQueryFromPath(path){
+    try { const i = String(path||'').indexOf('?'); return i>=0 ? String(path).slice(0,i) : String(path||''); } catch { return String(path||''); }
+  }
+  function buildFavKey(method, host, path){
+    try {
+      const m = String(method||'GET').toUpperCase();
+      const h = String(host||'').toLowerCase();
+      const p = ensurePath(stripQueryFromPath(path||'/'));
+      return h ? `${m}@${h}:${p}` : `${m}:${p}`;
+    } catch { return String(method||'GET') + ':' + String(path||'/'); }
+  }
+  function objFromCookieHeader(cookieHeader){
+    try {
+      const out = {};
+      const s = String(cookieHeader||'');
+      s.split(';').forEach(part => {
+        const kv = part.split('=');
+        const k = kv.shift();
+        if (!k) return;
+        out[k.trim()] = (kv.join('=')||'').trim();
+      });
+      return out;
+    } catch { return {}; }
+  }
+  function buildCookieHeader(cookiesObj){
+    try {
+      const pairs = [];
+      Object.keys(cookiesObj||{}).forEach(k => { if (k) pairs.push(`${k}=${cookiesObj[k]}`); });
+      return pairs.join('; ');
+    } catch { return ''; }
+  }
+  function humanTime(tsSec){
+    try {
+      const ms = Number(tsSec||0) * 1000;
+      const d = new Date(ms);
+      const Y = d.getFullYear(); const M = String(d.getMonth()+1).padStart(2,'0'); const D = String(d.getDate()).padStart(2,'0');
+      const h = String(d.getHours()).padStart(2,'0'); const m = String(d.getMinutes()).padStart(2,'0'); const s = String(d.getSeconds()).padStart(2,'0');
+      return `${Y}-${M}-${D} ${h}:${m}:${s}`;
+    } catch { return String(tsSec||''); }
+  }
+
+  // ---------- 星标状态 ----------
+  async function refreshFavIconForDetail(rec){
+    try {
+      const btn = el('btnFavoriteToggle'); const icon = el('iconFav');
+      if (!btn || !icon || !rec) return;
+      const key = buildFavKey(rec.method, rec.host, rec.path);
+      let existed = false;
+      try {
+        const ret = await window.MT.invoke('db.get', { collection: 'http-sniffer.favorites', key });
+        existed = !!ret;
+      } catch {}
+      icon.style.color = existed ? warnColor() : '';
+      btn.setAttribute('data-fav-existed', existed ? '1' : '0');
+    } catch {}
+  }
+
+  // ---------- 构建收藏值 ----------
+  function buildFavValueFromDetail(rec){
+    const now = Math.floor(Date.now()/1000);
+    // 拆分 URL
+    const scheme = rec.scheme || 'http';
+    const host = rec.host || '';
+    const rawPath = rec.path || '/';
+    let pathname = rawPath, params = {};
+    try {
+      const u = new URL(`${scheme}://${host}${rawPath}`);
+      pathname = u.pathname;
+      u.searchParams.forEach((v,k) => { params[k] = v; });
+    } catch {}
+    // 解析 Cookie
+    const cookies = objFromCookieHeader((rec.reqHeaders && (rec.reqHeaders['cookie']||rec.reqHeaders['Cookie']))||'');
+    const headers = { ...(rec.reqHeaders||{}) };
+    // 构造 URL（不含查询，参数放 params）
+    const url = `${scheme}://${host}${pathname}`;
+    // 请求体（限制存储大小）
+    let bodyText = String(rec.reqBody||'');
+    const maxSave = 200*1024;
+    let bodySaved = true;
+    if (bodyText && bodyText.length > maxSave) { bodyText = ''; bodySaved = false; }
+    const out = {
+      method: String(rec.method||'GET').toUpperCase(),
+      url,
+      scheme,
+      host,
+      path: pathname,
+      params,
+      headers,
+      cookies,
+      auth: { type: 'none' },
+      bodyType: bodyText ? (guessBodyType(headers, bodyText)) : 'none',
+      bodyText: bodyText || '',
+      note: '',
+      createdAt: now,
+      updatedAt: now
+    };
+    return { value: out, bodySaved };
+  }
+  function guessBodyType(headers, body){
+    try {
+      const ct = (headers && (headers['content-type']||headers['Content-Type'])||'').toLowerCase();
+      if (ct.includes('json')) return 'json';
+      if (ct.includes('x-www-form-urlencoded')) return 'form';
+      if (!ct && /^[\[{]/.test(String(body||'').trim())) return 'json';
+      return 'raw';
+    } catch { return 'raw'; }
+  }
+
+  // ---------- 收藏/取消收藏 ----------
+  async function onToggleFavorite(){
+    try {
+      const btn = el('btnFavoriteToggle');
+      if (!btn) return;
+      const existed = btn.getAttribute('data-fav-existed') === '1';
+      const rec = (window && window.lastDetail) || (typeof lastDetail !== 'undefined' ? lastDetail : null);
+    } catch {}
+  }
+
+  async function toggleFavorite(){
+    const rec = window.__HS_lastDetail;
+    if (!rec) { toast('请先选择一条请求'); return; }
+    const key = buildFavKey(rec.method, rec.host, rec.path);
+    try {
+      const existed = !!(await window.MT.invoke('db.get', { collection: FAV_COLLECTION, key }));
+      if (existed) {
+        await window.MT.invoke('db.del', { collection: FAV_COLLECTION, key });
+        toast('已取消收藏');
+      } else {
+        const built = buildFavValueFromDetail(rec);
+        await window.MT.invoke('db.put', { collection: FAV_COLLECTION, key, value: built.value });
+        if (!built.bodySaved) toast('请求体过大，已跳过保存 Body'); else toast('已加入收藏');
+      }
+      await refreshFavIconForDetail(rec);
+      // 若收藏面板打开，刷新列表
+      try { if (el('favoritesPanel') && el('favoritesPanel').style.display==='block') await loadFavoritesAndRender(); } catch {}
+    } catch (e) {
+      toast('操作失败: ' + (e && e.message || ''));
+    }
+  }
+
+  // ---------- 收藏列表 ----------
+  function rowActionsHTML(key){
+    const delIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 9v10H8V9h8m-1.5-6h-5l-1 1H5v2h14V4h-3.5l-1-1z"/></svg>';
+    const copyIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v12h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14l4-4h9c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2z"/></svg>';
+    return `
+      <div style="display:flex; gap:8px; justify-content:flex-end; opacity:.0; transition:.15s;">
+        <button class="btn btn-mini" data-act="copycurl" data-key="${encodeURIComponent(key)}" title="复制 cURL">${copyIcon}</button>
+        <button class="btn btn-mini" data-act="delete" data-key="${encodeURIComponent(key)}" title="删除" style="color:#dc3545;">${delIcon}</button>
+      </div>`;
+  }
+  function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c])); }
+  async function loadFavoritesAndRender(){
+    const list = await window.MT.invoke('db.list', { collection: FAV_COLLECTION, limit: 1000 });
+    const rows = Array.isArray(list) ? list : (list && list.data) || [];
+    const q = String(el('favSearch') && el('favSearch').value || '').toLowerCase();
+    const tbody = el('favTableBody'); if (!tbody) return;
+    let filtered = rows;
+    if (q) {
+      filtered = rows.filter(r => {
+        try {
+          const v = r.value || {};
+          const hay = [r.key, v.method, v.host, v.path, v.url, v.note].map(x=>String(x||'').toLowerCase()).join('\n');
+          return hay.includes(q);
+        } catch { return false; }
+      });
+    }
+    // 按更新时间倒序（db 已倒序，但搜索后保持）
+    filtered.sort((a,b)=>Number(b.updated_at||0)-Number(a.updated_at||0));
+    const html = filtered.map(r => {
+      const v = r.value || {};
+      return `<tr data-key="${encodeURIComponent(r.key)}" style="cursor:pointer;">
+        <td style="padding:8px 10px;">${escapeHtml(v.method||'GET')}</td>
+        <td class="nowrap-ellipsis" title="${escapeHtml(v.host||'')}" style="padding:8px 10px; max-width:150px;">${escapeHtml(v.host||'')}</td>
+        <td class="nowrap-ellipsis" title="${escapeHtml(v.path||'/')}" style="padding:8px 10px;">${escapeHtml(v.path||'/')}</td>
+        <td style="padding:8px 10px; text-align:right;">${rowActionsHTML(r.key)}</td>
+      </tr>`;
+    }).join('');
+    tbody.innerHTML = html || '';
+    // 行 hover 显示操作
+    Array.from(tbody.querySelectorAll('tr')).forEach(tr => {
+      tr.addEventListener('mouseenter', ()=>{ const act = tr.querySelector('div[style]'); if (act) act.style.opacity = '1'; });
+      tr.addEventListener('mouseleave', ()=>{ const act = tr.querySelector('div[style]'); if (act) act.style.opacity = '0'; });
+    });
+    try { const c = el('favCount'); if (c) c.textContent = `${filtered.length}`; } catch {}
+  }
+
+  function buildCurlPSFromFav(v){
+    const psQuote = (s) => `'${String(s==null?'':s).replace(/'/g, "''")}'`;
+    const headers = { ...(v.headers||{}) };
+    // 补充 Authorization
+    if (v.auth && v.auth.type === 'bearer' && v.auth.token) headers['Authorization'] = `Bearer ${v.auth.token}`;
+    if (v.auth && v.auth.type === 'basic' && v.auth.user!=null) {
+      try { const enc = btoa(`${v.auth.user}:${v.auth.pass||''}`); headers['Authorization'] = `Basic ${enc}`; } catch {}
+    }
+    // Cookie
+    const cookieStr = buildCookieHeader(v.cookies||{});
+    if (cookieStr) headers['Cookie'] = cookieStr;
+    // Body & Content-Type
+    let bodyText = String(v.bodyText||'');
+    if (v.bodyType === 'json') {
+      headers['Content-Type'] = headers['Content-Type'] || headers['content-type'] || 'application/json; charset=utf-8';
+    } else if (v.bodyType === 'form') {
+      headers['Content-Type'] = headers['Content-Type'] || headers['content-type'] || 'application/x-www-form-urlencoded';
+      try { if (bodyText === '' && v.form) bodyText = new URLSearchParams(v.form).toString(); } catch {}
+    }
+    // 构造 URL with params
+    const u = new URL(v.url);
+    try { Object.entries(v.params||{}).forEach(([k,val]) => { if (val!=null) u.searchParams.set(k,String(val)); }); } catch {}
+    const parts = ['curl.exe','-L','-X', String(v.method||'GET').toUpperCase(), `"${u.toString()}"`];
+    Object.keys(headers).forEach(k=>{ parts.push('-H', psQuote(`${k}: ${headers[k]}`)); });
+    if (bodyText && String(v.method||'GET').toUpperCase() !== 'GET') {
+      parts.push('--data-binary', psQuote(bodyText));
+    }
+    return parts.join(' ');
+  }
+
+  // ---------- 编辑器 ----------
+  function clearContainer(node){ while (node && node.firstChild) node.removeChild(node.firstChild); }
+  function addKVRow(container, k='', v=''){
+    const row = document.createElement('div');
+    row.style.display = 'flex'; row.style.gap = '8px'; row.style.alignItems = 'center'; row.style.padding = '6px 8px';
+    row.innerHTML = `<input class="input kvk" placeholder="Key" style="flex:0 0 32%;">`+
+                    `<input class="input kvv" placeholder="Value" style="flex:1">`+
+                    `<button class="btn kv-del">删除</button>`;
+    container.appendChild(row);
+    const [ik, iv, del] = [row.querySelector('.kvk'), row.querySelector('.kvv'), row.querySelector('.kv-del')];
+    ik.value = k||''; iv.value = v||'';
+    del.addEventListener('click', ()=>{ try { container.removeChild(row); } catch {} });
+  }
+  function rowsToObject(container){
+    const out = {};
+    if (!container) return out;
+    container.querySelectorAll('.kvk').forEach((ik) => {
+      const key = String(ik.value||'').trim();
+      const val = String((ik.parentElement && ik.parentElement.querySelector('.kvv') && ik.parentElement.querySelector('.kvv').value) || '').trim();
+      if (key) out[key] = val;
+    });
+    return out;
+  }
+  function fillRows(container, obj){
+    clearContainer(container);
+    const src = obj||{}; const keys = Object.keys(src);
+    if (keys.length===0) { addKVRow(container, '', ''); return; }
+    keys.forEach(k => addKVRow(container, k, src[k]));
+  }
+  function setActiveTab(name){
+    const names = ['params','auth','headers','cookies','body','response'];
+    names.forEach(n => {
+      const tab = el('tab-' + n);
+      if (tab) tab.style.display = (n===name) ? 'flex' : 'none';
+    });
+  }
+  function openEditorWithFav(val){
+    try {
+      const p = el('reqEditorPanel'); if (!p) return;
+      p.style.display = 'block';
+      const m = el('edMethod'); const url = el('edUrl'); const note = el('edNote');
+      m.value = String(val.method||'GET').toUpperCase();
+      url.value = String(val.url||'');
+      note.value = String(val.note||'');
+      // Params/Headers/Cookies
+      fillRows(el('paramRows'), val.params||{});
+      fillRows(el('headerRows'), val.headers||{});
+      fillRows(el('cookieRows'), val.cookies||{});
+      // Auth
+      const at = el('authType'); const btk = el('authBearerToken'); const bu = el('authBasicUser'); const bp = el('authBasicPass');
+      const auth = val.auth||{type:'none'}; at.value = auth.type||'none';
+      btk.value = auth.type==='bearer' ? (auth.token||'') : '';
+      bu.value = auth.type==='basic' ? (auth.user||'') : '';
+      bp.value = auth.type==='basic' ? (auth.pass||'') : '';
+      syncAuthInputs();
+      // Body
+      const bt = el('bodyType'); bt.value = val.bodyType||'none';
+      syncBodyBoxes();
+      el('bodyRaw').value = String(val.bodyText||'');
+      fillRows(el('formRows'), val.form||{});
+      // Response 清空
+      el('respMeta').textContent = '未发送';
+      el('respHeadersBox').textContent = '';
+      el('respCookiesBox').textContent = '';
+      el('respBodyBox').textContent = '';
+      setActiveTab('params');
+    } catch {}
+  }
+  function syncAuthInputs(){
+    const t = el('authType').value;
+    el('authBearer').style.display = (t==='bearer')? 'flex' : 'none';
+    el('authBasic').style.display = (t==='basic')? 'flex' : 'none';
+  }
+  function syncBodyBoxes(){
+    const t = el('bodyType').value;
+    el('bodyRawBox').style.display = (t==='raw' || t==='json')? '' : 'none';
+    el('bodyFormBox').style.display = (t==='form')? '' : 'none';
+  }
+  function buildUrlWithParams(baseUrl, params){
+    try { const u = new URL(baseUrl); Object.entries(params||{}).forEach(([k,v])=>{ if (v!=null) u.searchParams.set(k,String(v)); }); return u.toString(); } catch { return baseUrl; }
+  }
+  function collectEditorValue(){
+    const method = el('edMethod').value || 'GET';
+    const baseUrl = el('edUrl').value || '';
+    const params = rowsToObject(el('paramRows'));
+    const headers = rowsToObject(el('headerRows'));
+    const cookies = rowsToObject(el('cookieRows'));
+    const authType = el('authType').value;
+    const auth = { type: authType };
+    if (authType==='bearer') auth.token = el('authBearerToken').value||'';
+    if (authType==='basic') { auth.user = el('authBasicUser').value||''; auth.pass = el('authBasicPass').value||''; }
+    const bodyType = el('bodyType').value;
+    let bodyText = '';
+    let form = null;
+    if (bodyType==='raw' || bodyType==='json') bodyText = el('bodyRaw').value || '';
+    if (bodyType==='form') { form = rowsToObject(el('formRows')); bodyText = new URLSearchParams(form).toString(); }
+    const note = el('edNote').value||'';
+    const u = parseUrl(baseUrl);
+    const host = u ? (u.hostname || '') : '';
+    const path = u ? (u.pathname || '/') : '/';
+    return { method, url: buildUrlWithParams(baseUrl, params), scheme: (u && u.protocol ? u.protocol.replace(':','') : 'http'), host, path, params, headers, cookies, auth, bodyType, bodyText, form, note };
+  }
+  async function sendEditorRequest(){
+    try {
+      const v = collectEditorValue();
+      // 组装 headers（Auth/Cookie/Content-Type）
+      const headers = { ...(v.headers||{}) };
+      if (v.auth && v.auth.type === 'bearer' && v.auth.token) headers['Authorization'] = `Bearer ${v.auth.token}`;
+      if (v.auth && v.auth.type === 'basic') {
+        try { const enc = btoa(`${v.auth.user||''}:${v.auth.pass||''}`); headers['Authorization'] = `Basic ${enc}`; } catch {}
+      }
+      const cookieStr = buildCookieHeader(v.cookies||{}); if (cookieStr) headers['Cookie'] = cookieStr;
+      if (v.bodyType === 'json') headers['Content-Type'] = headers['Content-Type'] || headers['content-type'] || 'application/json; charset=utf-8';
+      if (v.bodyType === 'form') headers['Content-Type'] = headers['Content-Type'] || headers['content-type'] || 'application/x-www-form-urlencoded';
+      if (!headers['Accept']) headers['Accept'] = '*/*';
+      // URL 拆分
+      const finalUrl = v.url;
+      const u = parseUrl(finalUrl);
+      if (!u) { toast('URL 无效'); return; }
+      const options = {
+        protocol: (u.protocol||'http:').replace(':',''),
+        hostname: u.hostname,
+        port: u.port ? Number(u.port) : (u.protocol==='https:'?443:80),
+        path: u.pathname + (u.search||''),
+        method: String(v.method||'GET').toUpperCase(),
+        headers
+      };
+      const start = Date.now();
+      const res = await window.MT.invoke('net.request', v.bodyType==='none' ? options : { ...options, body: v.bodyText||'' });
+      const dur = Date.now() - start;
+      // 展示
+      try { el('respMeta').textContent = `状态 ${res && res.status} (${dur}ms)`; } catch {}
+      try {
+        const hdrs = res && res.headers || {};
+        const lines = Object.keys(hdrs).map(k => `${k}: ${hdrs[k]}`).join('\n');
+        el('respHeadersBox').textContent = lines;
+        // Cookies
+        const sc = hdrs['set-cookie'] || hdrs['Set-Cookie'] || '';
+        el('respCookiesBox').textContent = Array.isArray(sc) ? sc.join('\n') : String(sc||'');
+        // Body
+        let body = res && res.data || '';
+        try { if (/json/i.test(String(hdrs['content-type']||hdrs['Content-Type']||'')) && body) { body = JSON.stringify(JSON.parse(body), null, 2); } } catch {}
+        el('respBodyBox').textContent = body;
+      } catch {}
+      setActiveTab('response');
+    } catch (e) { toast('发送失败: ' + (e && e.message || '')); }
+  }
+  async function saveEditorToFavorites(){
+    try {
+      const v = collectEditorValue();
+      // 保存时对 body 做阈值保护
+      if (v.bodyText && v.bodyText.length > 200*1024) { v.bodyText=''; toast('请求体过大，已跳过保存 Body'); }
+      v.updatedAt = Math.floor(Date.now()/1000);
+      const key = buildFavKey(v.method, v.host, v.path);
+      await window.MT.invoke('db.put', { collection: FAV_COLLECTION, key, value: v });
+      toast('已保存');
+      try { if (el('favoritesPanel') && el('favoritesPanel').style.display==='block') await loadFavoritesAndRender(); } catch {}
+    } catch (e) { toast('保存失败: ' + (e && e.message || '')); }
+  }
+
+  // ---------- 绑定 ----------
+  function bindFavorites(){
+    const favBtn = el('btnFavoriteToggle');
+    if (favBtn) favBtn.addEventListener('click', toggleFavorite);
+    const favListBtn = el('btnFavList');
+    const favPanel = el('favoritesPanel');
+    if (favListBtn && favPanel) {
+      favListBtn.addEventListener('click', async (e)=>{ e.stopPropagation(); favPanel.style.display='block'; await loadFavoritesAndRender(); });
+      const favClose = el('btnFavClose'); if (favClose) favClose.addEventListener('click', ()=>{ favPanel.style.display='none'; });
+      document.addEventListener('click', (e)=>{ if (favPanel.style.display==='block' && !favPanel.contains(e.target)) favPanel.style.display='none'; });
+      favPanel.addEventListener('click', (e)=> e.stopPropagation());
+      const favSearch = el('favSearch'); if (favSearch) favSearch.addEventListener('input', debounce(loadFavoritesAndRender, 200));
+      const tbody = el('favTableBody');
+      if (tbody) tbody.addEventListener('click', async (e)=>{
+        const btn = e.target.closest('button'); if (!btn) return;
+        const act = btn.getAttribute('data-act'); const key = decodeURIComponent(btn.getAttribute('data-key')||'');
+        if (!act || !key) return;
+        const rec = await window.MT.invoke('db.get', { collection: FAV_COLLECTION, key });
+        const val = rec && (rec.value || rec) || null;
+        if (act === 'delete') { await window.MT.invoke('db.del', { collection: FAV_COLLECTION, key }); await loadFavoritesAndRender(); toast('已删除'); return; }
+        if (!val) { toast('数据不存在'); return; }
+        if (act === 'copycurl') {
+          const cmd = buildCurlPSFromFav(val);
+          await window.MT.clipboard.writeText(cmd);
+          toast('已复制 cURL(PS)');
+          return;
+        }
+      });
+      // 双击行直接打开编辑器
+      if (tbody) tbody.addEventListener('dblclick', async (e)=>{
+        const tr = e.target.closest('tr'); if (!tr) return;
+        const key = decodeURIComponent(tr.getAttribute('data-key')||''); if (!key) return;
+        const rec = await window.MT.invoke('db.get', { collection: FAV_COLLECTION, key });
+        const val = rec && (rec.value || rec) || null; if (!val) return;
+        openEditorWithFav(val);
+        favPanel.style.display = 'none';
+      });
+    }
+
+    // 编辑器绑定
+    const reqPanel = el('reqEditorPanel');
+    if (reqPanel) {
+      const close = el('btnEditorClose'); if (close) close.addEventListener('click', ()=>{ reqPanel.style.display='none'; const fav = el('favoritesPanel'); if (fav) fav.style.display='block'; });
+      const save = el('btnEditorSave'); if (save) save.addEventListener('click', saveEditorToFavorites);
+      const send = el('btnEditorSend'); if (send) send.addEventListener('click', sendEditorRequest);
+      // tabs
+      try {
+        const tabBar = reqPanel.querySelectorAll('button[data-tab]');
+        tabBar.forEach(b => b.addEventListener('click', ()=> setActiveTab(b.getAttribute('data-tab')) ));
+      } catch {}
+      // add buttons
+      const paramAdd = el('btnParamAdd'); if (paramAdd) paramAdd.addEventListener('click', ()=> addKVRow(el('paramRows'), '', ''));
+      const headerAdd = el('btnHeaderAdd'); if (headerAdd) headerAdd.addEventListener('click', ()=> addKVRow(el('headerRows'), '', ''));
+      const cookieAdd = el('btnCookieAdd'); if (cookieAdd) cookieAdd.addEventListener('click', ()=> addKVRow(el('cookieRows'), '', ''));
+      const formAdd = el('btnFormAdd'); if (formAdd) formAdd.addEventListener('click', ()=> addKVRow(el('formRows'), '', ''));
+      // auth/body toggles
+      const at = el('authType'); if (at) at.addEventListener('change', syncAuthInputs);
+      const bt = el('bodyType'); if (bt) bt.addEventListener('change', syncBodyBoxes);
+    }
+  }
+
+  // 暴露绑定函数给主作用域调用
+  Object.defineProperty(window, 'bindFavorites', { value: bindFavorites });
+  Object.defineProperty(window, 'refreshFavIconForDetail', { value: refreshFavIconForDetail });
 })();
