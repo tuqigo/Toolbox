@@ -1,384 +1,319 @@
-# MiniToolbox - 轻量化插件桌面工具箱
+# MiniToolbox
 
-基于 Electron 的插件式工具箱，采用“注册-匹配-决策”核心架构，高效可扩展，遵循“一切皆插件”。
+轻量化、可扩展的插件式桌面效率工具。采用“注册-匹配-决策”的架构范式与“Everything is a plugin”的设计哲学，提供统一受限 API 网关与安全沙箱，既开箱即用，又便于二次开发与扩展。
 
-## 架构总览（Host ↔ Plugin）
+- 平台: Electron (Windows 优先)
+- 语言: JavaScript/ES6+
+- 入口: `src/main.js`
+- 默认语言: 中文简体
 
-- 核心层（Host 主程序）
-  - 插件管理 PluginManager：扫描 `plugins/`，解析 `plugin.json`，编译匹配规则
-  - 输入分析 InputAnalyzer：判断输入类型（text/url/file/image/json/email...）
-  - 规则编译 RuleCompiler：将 `features[].cmds` 编译为可执行规则（regex/keyword/prefix/files）
-  - 匹配器 Matcher：仅规则命中才进入候选（文本类）；结合使用偏好分排序
-  - 窗口管理 WindowManager：按插件元信息创建/管理窗口（存在 `index.html` 即视为有 UI），失焦自动隐藏
-  - 配置/偏好/历史：`ConfigStore`、`UsageStore`、`ClipboardStore`
-  - IPC 网关：提供受限 API（如剪贴板、网络、外链打开、剪贴板历史）
+---
 
-- 插件生态（Plugin）
-  - `plugin.json` 通过 `features` 声明能力；Host 将规则编译后统一匹配
-  - 有 UI：`index.html`（可配 `window` 尺寸），通过 `window.MT` 调用受限 API
-  - 无 UI（Headless）：在 `preload` 指定的 JS 中导出各 `feature.code` 对应的处理器对象：`{ handleEnter, handleSelect }`
+## 特性亮点
+- 一切皆插件: UI 插件与无 UI 插件统一模型，按需多实例/单例
+- 注册-匹配-决策: 通过 `features.cmds` 的 `keyword/regex/prefix/files` 精准匹配
+- 统一受限 API: 插件仅能通过 `window.MT.invoke('mt.secure-call')` 访问系统能力
+- 安全沙箱: 插件窗口 `contextIsolation/sandbox` 开启，禁止直接 Node/FS
+- 响应式与主题: 深浅色与 Token 化主题，窗口与控件尺寸随屏幕自适配
+- 剪贴板助手: 自动填充、历史记录、文件/图片胶囊一体化体验
+- 可观测与日志: 开发期 Dev 日志直出；生产期文件日志，异常集中记录
+- 抓包与上游链式代理: 内置 MITM 代理服务，提供 HAR 导出、复放、延迟/改写规则等
 
-### 系统架构图
-
-```mermaid
-graph TD
-  A[Renderer 主输入框] -- analyze-content/match-plugins --> B[Main Host]
-  B -- loadAll/list --> PM[PluginManager]
-  PM -- compile --> RC[RuleCompiler]
-  B -- rebuild/match --> M[Matcher]
-  B -- createForPlugin --> W[WindowManager]
-  B -- stores --> S[Config/Usage/Clipboard]
-  subgraph Plugins
-    P1[有 UI: index.html] -->|window.MT| G[IPC 网关]
-    P2[无 UI: preload.js 的 feature 处理器]
-  end
-  B -- execute-plugin --> P1
-  B -- execute-headless --> P2
-  G -- mt.secure-call --> B
-```
-
-## 流程图
-
-### 输入到匹配到执行（主流程）
-
-```mermaid
-sequenceDiagram
-  participant R as Renderer(输入框)
-  participant M as Main Host
-  participant PM as PluginManager/Matcher
-  participant P as Plugin(有UI或无UI)
-
-  R->>M: analyze-content(query)
-  M->>R: contentAnalysis(type,length,...)
-  R->>M: match-plugins(contentAnalysis)
-  M->>PM: rebuild/index/match
-  PM-->>M: matched plugins(features)
-  M-->>R: results(featureExplain,featureCode,...)
-  R->>M: execute-plugin(pluginId,inputData)
-  alt 有UI
-    M->>P: create window & send plugin-input
-  else 无UI
-    M->>P: require(preload.js)[feature.handleEnter]
-    P-->>M: callbackSetList(items) 可多次
-    M-->>R: plugin-list-results(items)
-    R->>M: plugin-list-select(item)
-    M->>P: feature.handleSelect
-    opt 需要重定向
-      P-->>M: redirect(targetPluginId,content)
-      M-->>R: plugin-redirect
-    end
-  end
-```
-
-### 隐藏与剪贴板行为
-
-```mermaid
-sequenceDiagram
-  participant R as Renderer
-  participant M as Main
-  participant W as Plugin Window
-
-  R-->>M: document 外部点击 -> hide-main-window
-  M->>R: 主输入框隐藏(blur 也会隐藏)
-  W-->>W: blur -> hide()
-  Note over M: 任何 writeText 都会短暂设置忽略下一次剪贴板变化
-```
-
-### 详细代码流程图
-
-```mermaid
-graph TB
-    A[应用启动 main.js] --> B[初始化核心模块]
-    B --> C[ConfigStore 加载配置]
-    B --> D[PluginManager 扫描插件]
-    B --> E[创建主窗口]
-    B --> F[注册全局快捷键]
-    B --> G[启动剪贴板监听]
-    
-    C --> C1[读取 config.json]
-    C1 --> C2[合并默认配置]
-    C2 --> C3[应用UI主题和窗口设置]
-    
-    D --> D1[扫描 plugins 目录]
-    D1 --> D2[解析 plugin.json]
-    D2 --> D3[编译匹配规则]
-    D3 --> D4[构建插件索引]
-    
-    H[用户输入] --> I[InputAnalyzer 分析内容]
-    I --> J[Matcher 匹配插件]
-    J --> K[显示匹配结果]
-    K --> L[用户选择插件]
-    L --> M[执行插件]
-    
-    M --> N{插件类型}
-    N -->|有UI插件| O[WindowManager 创建窗口]
-    N -->|无UI插件| P[直接执行脚本]
-    
-    O --> Q[应用主题到插件窗口]
-    P --> R[返回结果到主界面]
-    
-    S[配置变更] --> T[IPC 通信]
-    T --> U[ConfigStore 更新配置]
-    U --> V[实时应用到所有窗口]
-    V --> W[更新托盘菜单]
-```
-
-### 配置刷新时序图
-
-```mermaid
-sequenceDiagram
-    participant U as 用户操作
-    participant T as 托盘菜单
-    participant M as 主进程
-    participant C as ConfigStore
-    participant W as WindowManager
-    participant R as 渲染进程
-    
-    U->>T: 点击配置选项
-    T->>M: 调用配置方法
-    M->>C: 更新配置值
-    C->>C: 保存到文件
-    C-->>M: 返回新配置
-    
-    M->>W: 应用主题变更
-    W->>W: 更新所有窗口
-    W->>R: 广播主题消息
-    
-    M->>T: 更新托盘菜单
-    T->>T: 重建菜单项
-    
-    Note over M,R: 配置立即生效，无需重启
-```
-
-
-### 插件匹配和执行时序图
-
-```mermaid
-sequenceDiagram
-    participant U as 用户输入
-    participant R as 渲染进程
-    participant M as 主进程
-    participant I as InputAnalyzer
-    participant Ma as Matcher
-    participant P as PluginManager
-    participant W as WindowManager
-    
-    U->>R: 输入内容
-    R->>M: IPC: analyze-content
-    M->>I: 分析输入类型
-    I-->>M: 返回内容分析结果
-    M-->>R: 返回分析结果
-    
-    R->>M: IPC: match-plugins
-    M->>Ma: 匹配插件
-    Ma->>P: 获取插件规则
-    P-->>Ma: 返回编译规则
-    Ma->>Ma: 规则匹配和评分
-    Ma-->>M: 返回匹配结果
-    M-->>R: 返回插件列表
-    
-    R->>R: 显示匹配结果
-    U->>R: 选择插件
-    R->>M: IPC: execute-plugin
-    
-    alt 有UI插件
-        M->>W: 创建插件窗口
-        W->>W: 应用主题配置
-        W-->>M: 返回窗口实例
-        M->>R: 发送输入数据到插件
-    else 无UI插件
-        M->>M: 执行插件脚本
-        M->>R: 返回执行结果
-    end
-```
-
-
-## 目录结构
-
-```
-src/
-  core/
-    inputAnalyzer.js    # 输入类型分析
-    ruleCompiler.js     # 规则编译器（features → 可执行规则）
-    pluginManager.js    # 插件清单加载与元信息构建
-    matcher.js          # 索引构建、匹配、打分排序
-    windowManager.js    # 插件窗口创建与管理
-    usageStore.js       # 插件使用频次，偏好排序
-    clipboardStore.js   # 剪贴板历史
-  preload/
-    plugin-preload.js   # 暴露安全 API（window.MT）
-  renderer/
-    index.html / renderer.js / style.css
-plugins/
-  <your-plugin>/plugin.json
-  <your-plugin>/index.html|index.js|script.js
-```
+---
 
 ## 快速开始
 
-1. `npm i`（或运行 `start.bat`）
-2. 运行：`npm run dev` 或 `npm start`
-3. `Ctrl+Space` 唤醒输入框，输入内容进行匹配
+```bash
+# 安装依赖（会自动重建原生依赖）
+npm install
 
-## 代码执行流程（要点）
+# 开发模式（带控制台日志、渲染端日志转发）
+npm run dev
 
-- Renderer 仅做输入、显示结果、收发 IPC；输入时使用 `analyze-content` 与 `match-plugins`
-- Main 将 `plugins/` 扫描为元信息，存在 `index.html` 判定 `ui=true`，`preload` 指向无 UI 处理模块
-- 规则：`regex | keyword | prefix | files`，文本类只在规则命中时展示
-- 无 UI 插件通过 `handleEnter(action, callbackSetList)` 产出列表，`handleSelect(action, itemData, callbackSetList)` 处理二级动作
-- 剪贴板写入：主进程统一拦截一次，短时间忽略自动回填
-- 隐藏规则：
-  - 主输入框 blur 自动隐藏；点击输入框/结果之外区域隐藏
-  - 插件窗口 blur 自动隐藏
-
-## 插件开发
-
-- 声明文件 `plugin.json`（核心字段）：
-```json
-{
-  "id": "my-plugin",
-  "name": "我的插件",
-  "description": "说明",
-  "logo": "🔧",
-  "window": { "width": 720, "height": 560, "resizable": true },
-  "preload": "preload.js",
-  "permissions": ["net", "clipboard"],
-  "features": [
-    {
-      "code": "demo.do",
-      "explain": "示例动作",
-      "cmds": [
-        { "type": "keyword", "value": "demo" },
-        { "type": "prefix", "value": "demo " },
-        { "type": "regex", "match": "/^do:.+/i" }
-      ]
-    }
-  ]
-}
+# 生产打包（Windows）
+npm run build:win
+# 便携版（单文件目录可直接分发）
+npm run build:win:portable
 ```
 
-- 有 UI 插件：`index.html` + `script.js`，通过 `window.MT.invoke(channel, ...)` 与 Host 交互
-- 无 UI 插件：在 `preload.js` 中按 feature 导出处理器对象：
+> 构建注意：使用了 `better-sqlite3`、`http-mitm-proxy` 等原生/二进制依赖。若首次构建失败，请执行 `npm run postinstall` 或 `electron-builder install-app-deps`，并确保 `build.asarUnpack`/`build.files` 已包含对应模块与 .node 文件（见 `package.json`）。
 
-```js
-// preload.js（无 UI 插件的功能处理器）
-module.exports['demo.do'] = {
-  async handleEnter(action, callbackSetList) {
-    const text = String(action.payload || '').trim();
-    if (!text) {
-      callbackSetList([{ title: '请输入内容', description: '', data: null }]);
-      return;
-    }
-    // 产出列表项（可多次调用，以分步加载）
-    callbackSetList([{ title: '处理结果', description: text.toUpperCase(), data: { value: text } }]);
-  },
-  async handleSelect(action, item, callbackSetList) {
-    // 处理列表点击，如复制/跳转/二级列表
-    const { redirect } = action;
-    if (redirect) redirect('json-formatter', JSON.stringify({ picked: item }, null, 2));
-  }
-};
+---
+
+## 架构总览（注册-匹配-决策 / 一切皆插件）
+
+```mermaid
+flowchart TD
+  User[用户输入] --> RUI[Renderer UI \n src/renderer]
+  RUI -- ipc.invoke analyze-content/match-plugins --> MAIN[Main Process \n src/main.js]
+  MAIN --> IA[InputAnalyzer \n 物理特征识别]
+  MAIN --> MATCHER[Matcher \n 规则匹配/打分]
+  MATCHER --> RC[RuleCompiler \n features.cmds]
+  MATCHER --> US[UsageStore \n 偏好加权]
+  MAIN --> PM[PluginManager \n 扫描/清单/ID]
+  PM --> PIM[PluginIdManager]
+  MAIN --> WM[WindowManager \n 顶栏+内容视图]
+  WM --> BW[BrowserWindow + BrowserViews]
+  subgraph Plugins[Plugins]
+    UIP[UI 插件 index.html]
+    HLP[无 UI 插件 script.js]
+  end
+  BW -->|preload| MT[window.MT \n plugin-preload.js]
+  MT -- mt.secure-call --> IPC[ipcMain.handle]
+  IPC --> CLIP[ClipboardStore]
+  IPC --> CFG[ConfigStore]
+  IPC --> DB[DBStore (SQLite)]
+  IPC --> CAP[CaptureProxyService]
+  IPC --> INS[PluginInstaller]
+  IPC --> ICON[IconManager]
+  MAIN --> THEME[themeTokens]
 ```
 
-### 图标与 Logo 配置指南
+---
 
-通过 `plugin.json` 的 `logo` 字段为插件设置图标。系统在不同位置的显示规则如下：
+## 核心目录与模块职责
 
-- 列表（主输入框下的插件结果列表）
-  - 支持：Emoji/字符、SVG、PNG/JPG/GIF/ICO、`file://`、`data:`。
-  - 行为：若为图片，按缩略图容器自适应（contain），不会被拉伸变形。
-  - 推荐：SVG 或 64×64 PNG（透明背景），图形居中，适度留白。
+- `src/main.js`: 应用入口；单点初始化窗口/托盘/全局快捷键/IPC；统一调度核心模块
+- `src/core/pluginManager.js`: 插件扫描与元信息构建（`plugin.json` → 规则、特性、窗口配置等）
+- `src/core/ruleCompiler.js`: 将 `features.cmds` 编译为高效规则（keyword/prefix/regex/files）
+- `src/core/matcher.js`: 基于内容与规则的候选筛选、打分与排序（偏好加权）
+- `src/core/inputAnalyzer.js`: 仅做基础物理特征识别（文件/图片/视频/音频/...）
+- `src/core/windowManager.js`: 插件窗口生命周期与“顶栏 + 内容”双 `BrowserView` 装配
+- `src/core/pluginIdManager.js`: 插件 ID 规范化、生成、冲突检测；本地/包/注册中心兼容
+- `src/core/pluginInstaller.js`: 插件搜索/安装/卸载/更新（支持本地 .mtpkg）
+- `src/core/dbStore.js`: SQLite KV/事件统计（每插件命名空间 + 配额/上限）
+- `src/core/clipboardStore.js`: 剪贴板历史（JSON 归一化/类型标注/按时效查询）
+- `src/core/usageStore.js`: 使用偏好计数（影响匹配排序）
+- `src/core/themeTokens.js`: 主题 Token（dark/light）与语义色/组件 Token 集
+- `src/core/captureProxy.js`: 抓包代理与系统代理管理、改写/延迟规则、HAR 导出、复放
+- `src/preload/plugin-preload.js`: 将受限 API 暴露为 `window.MT`（插件唯一系统能力入口）
+- `src/preload/chrome-preload.js`: 插件顶栏桥接 API（钉住/控制窗口/DevTools）
+- `src/plugin-api/api.js`: 老插件兼容层（将 `MiniToolboxAPI/MTAPI` 指向 `window.MT`）
+- `src/renderer/*`: 主输入框与结果列表、胶囊 UI、主题应用、自动填充与匹配交互
 
-- 沙盒顶部栏（插件窗口标题左侧小图标）
-  - 支持：SVG、PNG/JPG/GIF/ICO。
-  - 行为：固定显示高度约 18px，按 contain 自适应。
-  - 推荐：SVG 或 64×64 PNG（透明背景）。
+---
 
-- 任务栏/窗口图标（Windows）
-  - 支持：PNG/JPG/GIF/ICO（不支持 SVG）。
-  - 行为：当 `logo` 为位图/ICO 文件时，插件窗口将使用该文件作为任务栏图标；若为 SVG 则回退为默认图标。
-  - 推荐：256×256 或 128×128 PNG（透明背景），或多尺寸 ICO。
+## 启动流程图
 
-配置示例：
-
-```json
-{
-  "name": "剪贴板历史",
-  "description": "查看剪贴板历史",
-  "logo": "icon.svg", // 列表与顶部栏渲染为图片
-  "window": { "width": 720, "height": 560, "resizable": true },
-  "features": [ /* ... */ ]
-}
+```mermaid
+sequenceDiagram
+  participant App as Electron app
+  participant MT as MiniToolbox(main.js)
+  App->>MT: init()
+  MT->>ConfigStore: load()
+  MT->>UsageStore: load()
+  MT->>ClipboardStore: load()
+  MT->>MT: detectScreenAndCalculateSizes()
+  MT->>MT: createTray()/createMainWindow()
+  MT->>PluginManager: loadAll()
+  MT->>Matcher: rebuild(pluginList)
+  MT->>MT: setupIpcHandlers()
+  MT->>MT: applyConfigOnStartup()
+  MT->>MT: registerGlobalShortcuts()
+  MT->>MT: startClipboardMonitoring()
+  MT->>Window: showInputWindow()
 ```
 
-若需在任务栏显示清晰图标，建议直接让 `logo` 指向位图/ICO（如 `icon.png` 或 `icon.ico`）。
+---
 
-## 插件 API（window.MT）
+## 输入匹配与插件执行流程
 
-- 运行环境：有 UI 插件使用 sandbox + contextIsolation（无 Node/Electron），通过 `window.MT` 访问能力；无 UI 功能处理器在主进程中按 feature 执行。
-
-- 基本用法：
-```js
-// 监听主程序传入输入数据
-MT.onInput((inputData) => {
-  // inputData: { content, type, length, lines, timestamp, featureCode }
-});
-
-// 统一网关（底层）：
-const res = await MT.invoke('net.request', { hostname: 'httpbin.org', path: '/get', method: 'GET' });
+```mermaid
+sequenceDiagram
+  participant UI as Renderer UI
+  participant Main as Main
+  participant An as InputAnalyzer
+  participant M as Matcher
+  participant PM as PluginManager
+  UI->>Main: analyze-content(query)
+  Main->>An: analyze(query)
+  An-->>Main: {type,content,length,lines}
+  UI->>Main: match-plugins(contentAnalysis)
+  Main->>M: match(contentAnalysis)
+  M->>M: 规则筛选 + 偏好打分
+  M-->>Main: 排序后的 features 列表
+  Main-->>UI: 渲染候选
+  UI->>Main: execute-plugin(pluginId, inputData)
+  alt 插件有 UI
+    Main->>WindowManager: createForPlugin(meta)
+    Main-->>UI: clear-input
+    Main->>Plugin UI: send('plugin-input', safeInputData)
+  else 无 UI 插件
+    Main->>script.js: feature.handleEnter(action, callbackSetList)
+    script.js-->>Main: callbackSetList(items)
+    Main-->>UI: plugin-list-results(items)
+  end
 ```
 
-- 能力列表：
-  - 输入/消息：`onInput(callback)`
-  - 剪贴板：`clipboard.readText()`、`clipboard.writeText(text)`
-  - 外链：`shell.openExternal(url)`
-  - 网络：`net.request(options)` → `{ ok, status, headers, data } | { ok:false, error }`
-  - 剪贴板历史：`clip.query(params)`、`clip.delete(id)`、`clip.clear()`、`clip.copy(text)`
-  - 窗口控制（UI 插件）：
-    - 置顶钉住：`window.pin(true|false)`（钉住后失焦不隐藏，置顶）
-    - DevTools：`window.devtools.open()` / `close()` / `toggle()`（默认分离窗口）
-  - 工具/诊断：`utils.getPermissions()`（预留，现返回空数组）
+---
 
-- 示例：
-```js
-// 复制
-await MT.clipboard.writeText('Hello');
+## IPC 受限 API 网关（window.MT → mt.secure-call）
 
-// 打开链接
-await MT.shell.openExternal('https://example.com');
-
-// HTTP 请求
-const r = await MT.net.request({ protocol: 'https:', hostname: 'httpbin.org', path: '/get', method: 'GET' });
-if (r.ok) console.log(r.data);
-
-// 剪贴板历史
-const items = await MT.clip.query({ q: '', limit: 50 });
-if (items[0]) await MT.clip.copy(items[0].text || '');
-
-// UI 插件：钉住与 DevTools
-document.getElementById('btnPin').onclick = () => MT.window.pin(true);
-document.getElementById('btnUnpin').onclick = () => MT.window.pin(false);
-document.getElementById('btnDev').onclick = () => MT.window.devtools.toggle();
+```mermaid
+flowchart LR
+  PluginUI -- window.MT.invoke --> Preload[plugin-preload.js]
+  Preload -- ipcRenderer.invoke('mt.secure-call') --> IPC[ipcMain.handle]
+  IPC -- channel --> CLIP[clipboard.*]
+  IPC -- channel --> NET[net.request]
+  IPC -- channel --> CAP[capture.*]
+  IPC -- channel --> DB[db.* / stats.*]
+  IPC -- channel --> CFG[config.* / ui.getTheme]
+  IPC -- channel --> PL[plugin.list/reload]
+  IPC -- channel --> INS[installer.*]
 ```
 
-### 错误处理与最佳实践
+- 插件仅能通过 `window.MT.invoke(channel, payload)` 调用受限能力，禁止直连 Node/FS
+- 常用通道：`clipboard.readText/writeText`、`openExternal`、`net.request`、`ui.getTheme`
+- DB/Stats 以“插件命名空间 + featureCode 默认 collection”隔离，内置配额与值大小上限
 
-- 所有 `MT.*` 方法异常会抛出，请用 `try/catch` 捕获并给出友好提示。
-- 渲染层只做 UI 与 `MT` 调用；外部网络统一走 `MT.net.request`；注意转义输出避免 XSS。
+---
 
-## 已内置示例
+## 无 UI 插件交互（列表与选择）
 
-- `json-formatter`：JSON 格式化与压缩（有 UI）
-- `url-opener`：URL/域名直达（无 UI，进入即打开）
-- `clipboard-history`：剪贴板历史查看/搜索/复制/删除/清空（有 UI）
+```mermaid
+flowchart TD
+  UI -- execute-plugin --> Main
+  Main -->|require(script.js)| Feature[featureCode]
+  Feature -->|handleEnter| Items[callbackSetList(items)]
+  Items --> Main --> UI
+  UI -- plugin-list-select(item) --> Main --> Feature.handleSelect
+  Feature -- action.redirect --> Main.redirectToPlugin --> Main.executePlugin
+```
 
+---
 
-## 打包命令
+## 主题与响应式
 
-- npm run build:win:portable # 便携版 (推荐)
-- npm run build:win:nsis # 安装程序版  
-- npm run build:win # 两个版本一起构建
+- `ConfigStore.ui.theme` 支持 `system/light/dark`；启动与切换时 `applyThemeToWindows()` 广播 `ui-theme`
+- `themeTokens.js` 暴露 dark/light 双套 token（语义色/组件 token/动效/间距）
+- `detectScreenAndCalculateSizes()` 读取工作区大小，计算窗口/输入框/胶囊/缩略图等尺寸（随屏类型 small/medium/large 自适配）
 
-## 许可证
+```mermaid
+flowchart TD
+  ConfigStore.ui.theme --> Main.setTheme --> Main.applyThemeToWindows --> WM.broadcastTheme --> Renderer&Topbar
+```
 
-MIT License
+---
+
+## 剪贴板与胶囊
+
+- 主进程 500ms 轮询剪贴板，变化后通过 `clipboard-changed` 通知渲染端
+- 渲染端在聚焦且输入为空时自动填充“最近 N 秒”的剪贴板内容（`get-recent-clipboard`）
+- 文件/图片/长文本自动生成“胶囊”，图片即刻异步生成缩略图，JSON 文本单行化存储
+
+```mermaid
+sequenceDiagram
+  Main->>Clipboard: 轮询/去抖
+  Main-->>UI: clipboard-changed(content)
+  UI->>UI: 自动填充/生成胶囊
+  UI->>Main: get-clipboard-config / get-recent-clipboard
+```
+
+---
+
+## 抓包代理与链式上游
+
+- 通过 `capture.*` 通道控制 `CaptureProxyService`：`start/stop/status/list/detail/getBody/exportHar/installCert/...`
+- 支持按 host 与 path 前缀过滤、请求/响应头改写、Mock/拦截、延迟规则、HAR 导出、请求复放（cURL/Powershell）
+- Windows 支持系统层代理开关/恢复、证书安装/卸载，带自连保护与开机修复
+
+```mermaid
+flowchart TD
+  PluginUI -- MT.invoke('capture.*') --> Main --> CaptureProxyService
+  CaptureProxyService --> MITM[http-mitm-proxy]
+  CaptureProxyService --> Records[list/detail/getBody/exportHar]
+  CaptureProxyService --> SystemProxy[enable/disable/guard]
+```
+
+---
+
+## 插件开发概览
+
+- 清单 `plugin.json` 必填；UI 插件应包含 `index.html`，无 UI 插件实现 `script.js`
+- `features` 定义功能；`cmds` 支持 `keyword`/`regex`/`prefix`/`files`
+- 无 UI 插件处理器约定：
+  - `handleEnter(action, callbackSetList)`
+  - `handleSelect(action, itemData, callbackSetList)`
+  - 可通过 `action.redirect('plugin-id', input)` 跳转到其他插件
+- UI 插件窗口尺寸/行为在 `plugin.json.window` 配置（如 `hideOnBlur`）
+- 插件访问系统能力：仅通过 `window.MT.invoke('channel', payload)`（见“IPC 受限 API”）
+
+更多请参考：`docs/插件开发安装打包分发使用文档.md`、`docs/插件plugin.json使用方法.md`。
+
+---
+
+## 配置与数据
+
+- 配置存储 `ConfigStore`（`userData/config.json`），提供 UI/窗口/搜索/性能/快捷键等配置项
+- 数据存储 `DBStore`（SQLite，`userData/data/data.sqlite`），提供 KV 与事件统计 API：
+  - `db.put/get/del/list/count`（默认以最近的 `featureCode` 作为 collection）
+  - `stats.inc/range`（分钟/小时/日聚合）
+- 使用偏好 `UsageStore`（影响匹配排序），剪贴板历史 `ClipboardStore`（JSON 单行化/类型标注）
+
+---
+
+## 安全模型
+
+- 插件窗口默认启用 `contextIsolation: true`、`sandbox: true`、`nodeIntegration: false`
+- 仅通过 `window.MT` 访问系统能力；主进程统一网关 `mt.secure-call` 逐通道鉴权与入参校验
+- 所有外部内容展示需转义；URL 必须校验协议（仅 `http/https`）
+
+---
+
+## 日志与排障
+
+- 开发期：`electron --dev` 启用渲染端日志转发与主进程详细日志
+- 生产期：`FileLogger` 将 `console.*` 写入 `userData/logs/MiniToolbox-YYYYMMDD.log`（自动轮转）
+- 常见问题：
+  - better-sqlite3 无法加载：执行 `npm run postinstall`，并确认构建配置包含 `.node` 与 `bindings/*`
+  - 打包后插件静态资源：确保 `asarUnpack` 与 `files` 中包含 `plugins/**/*`
+  - 抓包证书安装：Windows 依赖 `certutil`；如失败可尝试管理员权限重新安装
+
+---
+
+## 目录结构（关键路径）
+
+```text
+src/
+  main.js
+  core/
+    pluginManager.js
+    ruleCompiler.js
+    matcher.js
+    inputAnalyzer.js
+    windowManager.js
+    pluginIdManager.js
+    pluginInstaller.js
+    dbStore.js
+    clipboardStore.js
+    usageStore.js
+    captureProxy.js
+    themeTokens.js
+    iconManager.js
+  preload/
+    plugin-preload.js
+    chrome-preload.js
+  plugin-api/
+    api.js
+  renderer/
+    index.html
+    renderer.js
+    style.css
+  ui/
+    chrome.html
+plugins/
+  ... 内置与用户插件示例
+```
+
+---
+
+## 开源协议
+
+MIT License © MiniToolbox Team
+
+---
+
+## 致谢
+
+感谢所有为 MiniToolbox 提交反馈与插件的开发者们！
+
