@@ -561,7 +561,7 @@
       // 先加载已保存设置并填充输入框
       await loadSettingsAndFillInputs();
       await syncSystemUpstreamState();
-      await start();
+      // await start();
     } catch (e) { toast('自动启动失败，请手动启动'); }
     loop();
   });
