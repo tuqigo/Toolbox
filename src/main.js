@@ -17,6 +17,7 @@ const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, dialog, clipboa
 const path = require('path');
 const fs = require('fs-extra');
 const { PluginManager } = require('./core/pluginManager');
+const { ExecService } = require('./core/execService'); // 2025-09-20: 新增受限执行服务（实用版 v1）
 const { InputAnalyzer } = require('./core/inputAnalyzer');
 const { WindowManager } = require('./core/windowManager');
 const { ClipboardStore } = require('./core/clipboardStore');
@@ -74,6 +75,8 @@ class MiniToolbox {
     this.matcher = new Matcher({ isQuiet: this.isQuiet, usageStore: this.usageStore });
     this.pluginInstaller = new PluginInstaller({ isQuiet: this.isQuiet });
     this.iconManager = new IconManager();
+    // 2025-09-20: 初始化受限执行服务（实用版 v1）
+    this.execService = new ExecService({ pluginManager: this.pluginManager, configStore: this.configStore, isQuiet: this.isQuiet, getDataDir: this.getDataDir.bind(this) });
     this.devLoggingInitialized = false;
     this.fileLogger = null;
     // 抓包服务
@@ -1421,6 +1424,167 @@ class MiniToolbox {
             } catch (e) {
               return { ok: false, error: e && e.message || String(e) };
             }
+          }
+          // 2025-09-20: 通用受限执行器（实用版 v1）
+          case 'exec.check': {
+            try {
+              const pid = getPluginIdFromEvent(event);
+              const meta = pid && this.pluginManager.get(pid);
+              if (!meta) return { ok: false, error: 'unknown plugin' };
+              return await this.execService.check(meta);
+            } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          }
+          case 'exec.run': {
+            try {
+              const pid = getPluginIdFromEvent(event);
+              const meta = pid && this.pluginManager.get(pid);
+              if (!meta) return { ok: false, error: 'unknown plugin' };
+              return await this.execService.run(meta, payload || {});
+            } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          }
+          // 2025-09-20: 新增 - 实时日志流式执行（仅当前会话）
+          case 'exec.runStream': {
+            try {
+              const pid = getPluginIdFromEvent(event);
+              const meta = pid && this.pluginManager.get(pid);
+              if (!meta) return { ok: false, error: 'unknown plugin' };
+              const exeName = String(payload && payload.name || '').trim();
+              if (!exeName) return { ok: false, error: 'invalid name' };
+
+              // 解析可执行路径与授权
+              const resolved = await this.execService.resolveExecutable(meta, exeName);
+              if (!resolved || !resolved.ok) return { ok: false, error: 'executable not allowed or missing' };
+              const allow = await this.execService.ensureAuthorized(meta, resolved.name);
+              if (!allow) return { ok: false, error: 'user denied' };
+
+              const { spawn } = require('child_process');
+              const args = Array.isArray(payload.args) ? payload.args.map(x => String(x)) : [];
+              const timeoutMsRaw = Number(payload.timeoutMs || 15 * 60 * 1000);
+              const timeoutMs = Math.max(1000, Math.min(60 * 60 * 1000, timeoutMsRaw));
+              const env = Object.assign({}, process.env || {});
+
+              const child = spawn(resolved.path, args, {
+                cwd: require('path').dirname(resolved.path),
+                windowsHide: true,
+                shell: false,
+                env
+              });
+
+              const taskId = `${meta.id}|${Date.now()}|${Math.random().toString(36).slice(2)}`;
+              const wc = event && event.sender;
+
+              let timer = setTimeout(() => {
+                try {
+                  if (process.platform === 'win32') {
+                    const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, shell: true });
+                    killer.on('error', () => {});
+                  } else {
+                    child.kill('SIGKILL');
+                  }
+                } catch {}
+              }, timeoutMs);
+
+              const send = (channel, data) => { try { wc && wc.send(channel, data); } catch {} };
+              child.stdout.on('data', (d) => send('mt.exec.log', { taskId, stream: 'stdout', text: d.toString('utf8') }));
+              child.stderr.on('data', (d) => send('mt.exec.log', { taskId, stream: 'stderr', text: d.toString('utf8') }));
+
+              // 可选 stdin（UTF-8）
+              try {
+                if (payload.stdin && child.stdin && !child.stdin.destroyed) {
+                  child.stdin.write(String(payload.stdin));
+                  child.stdin.end();
+                }
+              } catch {}
+
+              child.on('error', (e) => {
+                if (timer) { clearTimeout(timer); timer = null; }
+                send('mt.exec.end', { taskId, code: -1, error: e && e.message || String(e) });
+              });
+              child.on('close', (code) => {
+                if (timer) { clearTimeout(timer); timer = null; }
+                send('mt.exec.end', { taskId, code });
+              });
+
+              return { ok: true, data: { taskId } };
+            } catch (e) {
+              return { ok: false, error: e && e.message || String(e) };
+            }
+          }
+          // 2025-09-20: 基础文件/目录选择与视频列表（供插件复用）
+          case 'dialog.pickFiles': {
+            try {
+              const { multi, filters } = payload || {};
+              const ret = await dialog.showOpenDialog({
+                title: '选择文件',
+                properties: ['openFile', ...(multi ? ['multiSelections'] : [])],
+                filters: Array.isArray(filters) && filters.length ? filters : undefined
+              });
+              if (ret.canceled || !ret.filePaths?.length) return { ok: false, error: 'cancelled' };
+              return { ok: true, data: ret.filePaths };
+            } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          }
+          case 'dialog.pickDirectory': {
+            try {
+              const ret = await dialog.showOpenDialog({
+                title: '选择目录',
+                properties: ['openDirectory', 'createDirectory']
+              });
+              if (ret.canceled || !ret.filePaths?.length) return { ok: false, error: 'cancelled' };
+              return { ok: true, data: ret.filePaths[0] };
+            } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          }
+          case 'dialog.pickSaveFile': {
+            try {
+              const { defaultPath, filters } = payload || {};
+              const ret = await dialog.showSaveDialog({ title: '选择输出文件', defaultPath, filters });
+              if (ret.canceled || !ret.filePath) return { ok: false, error: 'cancelled' };
+              return { ok: true, data: ret.filePath };
+            } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
+          }
+          // 2025-09-20: 新增通用目录枚举通道（可复用）
+          case 'fs.list': {
+            try {
+              const { dir, extensions, recursive, includeFiles, includeDirs, maxEntries, includeStats } = payload || {};
+              if (!dir) return { ok: false, error: 'invalid dir' };
+              const root = String(dir);
+              const wantFiles = includeFiles !== false; // 默认列出文件
+              const wantDirs = includeDirs === true;    // 默认不列出目录
+              const limit = Math.max(0, Number(maxEntries || 0));
+              const exts = Array.isArray(extensions) && extensions.length ? new Set(extensions.map(e => ('.' + String(e).replace(/^\./,'')).toLowerCase())) : null;
+
+              // 时间：2025-09-20 修改说明：新增可递归的通用目录枚举器，支持扩展名过滤/返回stats
+              const results = [];
+              const walk = async (base) => {
+                const names = await fs.readdir(base);
+                for (const name of names) {
+                  const p = path.join(base, name);
+                  let st;
+                  try { st = await fs.stat(p); } catch { continue; }
+                  if (st.isDirectory()) {
+                    if (wantDirs) {
+                      results.push(includeStats ? { path: p, type: 'dir', size: st.size, mtime: st.mtime } : p);
+                      if (limit && results.length >= limit) return;
+                    }
+                    if (recursive === true) {
+                      await walk(p);
+                      if (limit && results.length >= limit) return;
+                    }
+                  } else if (st.isFile()) {
+                    if (exts) {
+                      const ext = path.extname(name).toLowerCase();
+                      if (!exts.has(ext)) continue;
+                    }
+                    if (wantFiles) {
+                      results.push(includeStats ? { path: p, type: 'file', size: st.size, mtime: st.mtime } : p);
+                      if (limit && results.length >= limit) return;
+                    }
+                  }
+                }
+              };
+
+              await walk(root);
+              return { ok: true, data: results };
+            } catch (e) { return { ok: false, error: e && e.message || String(e) }; }
           }
           default: {
             try {

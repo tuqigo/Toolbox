@@ -55,6 +55,18 @@ const api = {
   net: {
     request: (options) => secureInvoke('net.request', options || {})
   },
+  exec: {
+    run: (payload) => secureInvoke('exec.run', payload || {}),
+    runStream: async (payload, handlers = {}) => {
+      const res = await secureInvoke('exec.runStream', payload || {});
+      const { taskId } = res || {};
+      const onLog = (e, msg) => { try { if (msg && msg.taskId === taskId && handlers.onLog) handlers.onLog(msg); } catch {} };
+      const onEnd = (e, msg) => { try { if (msg && msg.taskId === taskId && handlers.onEnd) handlers.onEnd(msg); } catch {} };
+      ipcRenderer.on('mt.exec.log', onLog);
+      ipcRenderer.on('mt.exec.end', onEnd);
+      return { taskId, dispose(){ try{ ipcRenderer.removeListener('mt.exec.log', onLog); ipcRenderer.removeListener('mt.exec.end', onEnd); }catch{} } };
+    }
+  },
   clip: {
     query: (params) => secureInvoke('clip.query', params || {}),
     delete: (id) => secureInvoke('clip.delete', id),

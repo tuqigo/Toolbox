@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FFmpeg 工具</title>
+  <style>
+    :root{ --bg:#ffffff; --fg:#222; --panel:#ffffff; --border:#e5e7eb; --muted:#777; --accent:#007AFF; --hover:rgba(0,0,0,0.06); }
+    body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial; background:var(--bg); color:var(--fg); }
+    .wrap{ display:grid; grid-template-columns: 1fr 320px; grid-template-rows: auto 1fr 160px; gap:10px; padding:12px; height:100vh; box-sizing:border-box; }
+    .toolbar{ grid-column:1/3; display:flex; gap:8px; align-items:center; }
+    .btn{ height:32px; padding:0 12px; border:1px solid var(--border); background:var(--panel); color:var(--fg); border-radius:6px; cursor:pointer; }
+    .btn:hover{ background:var(--hover); }
+    .secondary{ color:var(--muted); }
+    .danger{ border-color:#ef4444; color:#ef4444; }
+    .list{ border:1px solid var(--border); border-radius:8px; overflow:auto; background:var(--panel); }
+    .item{ display:flex; justify-content:space-between; align-items:center; padding:8px 10px; border-bottom:1px solid var(--border); }
+    .item:last-child{ border-bottom:none; }
+    .item .path{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; color:var(--fg); }
+    .item .ops{ display:flex; gap:6px; }
+    .right{ border:1px solid var(--border); border-radius:8px; padding:10px; background:var(--panel); }
+    .field{ margin-bottom:10px; }
+    .field label{ display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+    .input, .select{ width:100%; height:32px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--fg); padding:0 8px; }
+    .logs{ grid-column:1/3; border:1px solid var(--border); border-radius:8px; background:var(--panel); padding:8px; overflow:auto; font-family:ui-monospace,Consolas,monospace; font-size:12px; white-space:pre-wrap; }
+    .status{ font-size:12px; color:var(--muted); }
+    .toast{ position:fixed; right:14px; bottom:14px; background:rgba(0,0,0,0.8); color:#fff; padding:8px 12px; border-radius:6px; font-size:12px; display:none; z-index:9999; }
+  </style>
+  <script>
+    (async function(){
+      function applyTheme(eff){
+        const root = document.documentElement;
+        if (eff === 'dark'){
+          root.style.setProperty('--bg', '#0f1113');
+          root.style.setProperty('--panel', '#2b2d31');
+          root.style.setProperty('--fg', '#e6e7ea');
+          root.style.setProperty('--border', '#3a3b41');
+          root.style.setProperty('--muted', '#9aa0a6');
+          root.style.setProperty('--hover', 'rgba(255,255,255,0.06)');
+        } else {
+          root.style.setProperty('--bg', '#ffffff');
+          root.style.setProperty('--panel', '#ffffff');
+          root.style.setProperty('--fg', '#222222');
+          root.style.setProperty('--border', '#e5e7eb');
+          root.style.setProperty('--muted', '#777777');
+          root.style.setProperty('--hover', 'rgba(0,0,0,0.06)');
+        }
+      }
+      try{ const t = await window.MT.invoke('ui.getTheme'); applyTheme((t && t.effective) || 'light'); }catch{}
+      window.addEventListener('mt-theme-change', (e)=>{ try{ applyTheme((e.detail && e.detail.effective) || 'light'); }catch{} });
+    })();
+  </script>
+  <script defer src="script.js"></script>
+  <script>
+    window.MTAPI = window.MT;
+  </script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="toolbar">
+      <button id="pickFiles" class="btn">选择文件</button>
+      <button id="pickDir" class="btn">选择目录</button>
+      <span id="ffmpegStatus" class="status"></span>
+      <span style="flex:1"></span>
+      <button id="openDownload" class="btn secondary">下载 ffmpeg</button>
+    </div>
+
+    <div class="list" id="fileList"></div>
+
+    <div class="right">
+      <div class="field">
+        <label>操作类型</label>
+        <select id="action" class="select">
+          <option value="remux">无损换封装（-c copy）</option>
+          <option value="transcode">转码压缩（HEVC/H.264）</option>
+          <option value="concat">无损合并</option>
+          <option value="extractAudio">提取音频</option>
+          <option value="trim">无损截取</option>
+          <option value="gif">生成 GIF</option>
+          <option value="snapshot">提取封面</option>
+        </select>
+      </div>
+
+      <div id="opt-remux" class="opts">
+        <div class="field"><label>输出格式</label>
+          <select id="remuxFmt" class="select">
+            <option>mp4</option><option>mkv</option><option>mov</option><option>m4v</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="opt-transcode" class="opts" style="display:none;">
+        <div class="field"><label>视频编码器</label>
+          <select id="vcodec" class="select">
+            <option>libx265</option>
+            <option>libx264</option>
+          </select>
+        </div>
+        <div class="field"><label>CRF（10-40，数值越小越清晰）</label>
+          <input id="crf" class="input" value="28">
+        </div>
+        <div class="field"><label>preset</label>
+          <select id="preset" class="select">
+            <option>medium</option><option>slow</option><option>fast</option>
+          </select>
+        </div>
+        <div class="field"><label>音频编码</label>
+          <select id="acodec" class="select">
+            <option>copy</option><option>aac</option><option>mp3</option>
+          </select>
+        </div>
+        <div class="field"><label>输出格式</label>
+          <select id="transFmt" class="select">
+            <option>mp4</option><option>mkv</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="opt-concat" class="opts" style="display:none;">
+        <div class="field"><label>输出容器</label>
+          <select id="concatFmt" class="select">
+            <option>mp3</option><option>m4a</option><option>wav</option>
+            <option>mp4</option><option>mkv</option>
+          </select>
+        </div>
+        <div class="field">
+          <button id="pickConcatOut" class="btn">选择输出文件</button>
+          <span id="concatOutPath" class="status"></span>
+        </div>
+      </div>
+
+      <div id="opt-extractAudio" class="opts" style="display:none;">
+        <div class="field"><label>音频格式</label>
+          <select id="audioFmt" class="select">
+            <option>m4a</option><option>mp3</option><option>aac</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="opt-trim" class="opts" style="display:none;">
+        <div class="field"><label>开始时间（如 00:00:05 或 5）</label>
+          <input id="trimStart" class="input" placeholder="00:00:05" value="00:00:00">
+        </div>
+        <div class="field"><label>持续时长（可选，如 10 或 00:00:10）</label>
+          <input id="trimDur" class="input" placeholder="10">
+        </div>
+        <div class="field"><label>输出格式</label>
+          <select id="trimFmt" class="select">
+            <option>mp4</option><option>mkv</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="opt-gif" class="opts" style="display:none;">
+        <div class="field"><label>时长（秒，1-60）</label><input id="gifSecs" class="input" value="5"></div>
+        <div class="field"><label>高度（px，120-1080）</label><input id="gifH" class="input" value="480"></div>
+        <div class="field">
+          <button id="pickGifOut" class="btn">选择输出文件</button>
+          <span id="gifOutPath" class="status"></span>
+        </div>
+      </div>
+
+      <div id="opt-snapshot" class="opts" style="display:none;">
+        <div class="field"><label>时间点（如 00:00:01）</label><input id="snapAt" class="input" value="00:00:01"></div>
+        <div class="field">
+          <button id="pickSnapOut" class="btn">选择输出文件</button>
+          <span id="snapOutPath" class="status"></span>
+        </div>
+      </div>
+
+      <!-- 输出目录移除：默认源目录 -->
+
+      <div>
+        <button id="run" class="btn">开始执行</button>
+      </div>
+    </div>
+
+    <div class="logs" id="logs"></div>
+  </div>
+  <div id="toast" class="toast"></div>
+</body>
+</html>
+
+

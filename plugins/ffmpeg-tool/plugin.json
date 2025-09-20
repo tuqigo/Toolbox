@@ -1,0 +1,30 @@
+{
+  "name": "FFmpeg 工具",
+  "description": "视频无损换封装、合并、转码压缩、截取、提取音频等",
+  "logo": "icon.png",
+  "instance": "multi",
+  "window": {
+    "width": 980,
+    "height": 680,
+    "resizable": true,
+    "hideOnBlur": false
+  },
+  "allowExec": ["bin/ffmpeg.exe"],
+  "features": [
+    {
+      "code": "ffmpeg.open",
+      "explain": "打开 FFmpeg 工具面板",
+      "cmds": [
+        { "type": "keyword", "value": "ffm" },
+        { "type": "keyword", "value": "ffmpeg" },
+        { "type": "keyword", "value": "视频" },
+        { "type": "keyword", "value": "转码" },
+        { "type": "keyword", "value": "压缩视频" },
+        { "type": "keyword", "value": "合并视频" },
+        { "type": "keyword", "value": "提取音频" }
+      ]
+    }
+  ]
+}
+
+
