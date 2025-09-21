@@ -151,6 +151,7 @@ class MiniToolboxRenderer {
         this.applyTheme(payload);
       });
     } catch {}
+
   }
 
   setupEventListeners() {
@@ -648,46 +649,44 @@ class MiniToolboxRenderer {
 
   showContentType(type) { /* 已移除类型指示 */ }
 
+  // 时间：2025-09-21 修改说明：优先按 themeTokens 应用主题变量，并同步 data-theme 属性
   applyTheme(payload) {
     try {
       const eff = (payload && payload.effective) || 'light';
       const pll = (payload && payload.palette) || {};
       const root = document.documentElement;
-      const bg = eff === 'dark' ? '#0f1113' : 'transparent';
+      // 设置 data-theme 以便 CSS 选择器使用（如骨架屏等）
+      try { root.setAttribute('data-theme', eff); } catch {}
+
+      // 优先使用 themeTokens（若主进程已下发）
+      const tokens = (payload && payload.tokens) || null;
+      const tok = tokens && tokens[eff] && tokens[eff].color ? tokens[eff].color : null;
+
+      const bg = tok && tok.bg ? tok.bg : (eff === 'dark' ? '#0f1113' : 'transparent');
+      const panel = tok && tok.panel ? tok.panel : (pll.panel || (eff === 'dark' ? '#2b2d31' : 'rgba(255,255,255,0.95)'));
+      const fg = tok && tok.fg ? tok.fg : (pll.fg || (eff === 'dark' ? '#e6e7ea' : '#333'));
+      const border = tok && tok.border ? tok.border : (pll.border || (eff === 'dark' ? '#3a3b41' : 'rgba(0,0,0,0.08)'));
+      const muted = tok && tok.muted ? tok.muted : (eff === 'dark' ? '#a1a1aa' : '#666');
+
       root.style.setProperty('--mt-bg', bg);
-      root.style.setProperty('--mt-panel', pll.panel || (eff==='dark' ? '#2b2d31' : 'rgba(255,255,255,0.95)'));
-      root.style.setProperty('--mt-fg', pll.fg || (eff==='dark' ? '#e6e7ea' : '#333'));
-      root.style.setProperty('--mt-border', pll.border || (eff==='dark' ? '#3a3b41' : 'rgba(0,0,0,0.08)'));
+      root.style.setProperty('--mt-panel', panel);
+      root.style.setProperty('--mt-fg', fg);
+      root.style.setProperty('--mt-border', border);
       // 调整 hover 对比度，并新增强 hover 变量，提升暗黑/明亮模式下的可感知度
-      root.style.setProperty('--mt-hover', pll.hover || (eff==='dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'));
-      root.style.setProperty('--mt-hover-strong', pll.hoverStrong || (eff==='dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'));
-      root.style.setProperty('--mt-selected', pll.selected || (eff==='dark' ? 'rgba(0,122,255,0.22)' : 'rgba(0,122,255,0.12)'));
-      root.style.setProperty('--mt-iconbg', pll.iconBg || (eff==='dark' ? '#3a3b41' : '#f1f1f3'));
+      root.style.setProperty('--mt-hover', pll.hover || (eff === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'));
+      root.style.setProperty('--mt-hover-strong', pll.hoverStrong || (eff === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'));
+      root.style.setProperty('--mt-selected', pll.selected || (eff === 'dark' ? 'rgba(0,122,255,0.22)' : 'rgba(0,122,255,0.12)'));
+      root.style.setProperty('--mt-iconbg', pll.iconBg || (eff === 'dark' ? '#3a3b41' : '#f1f1f3'));
       root.style.setProperty('--mt-scrollbar-thumb', eff==='dark' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)');
       root.style.setProperty('--mt-scrollbar-thumb-hover', eff==='dark' ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)');
       root.style.setProperty('--mt-scrollbar-track', eff==='dark' ? 'rgba(255,255,255,0.06)' : 'transparent');
-      root.style.setProperty('--mt-text-muted', pll.fgMuted || (eff==='dark' ? '#a1a1aa' : '#666'));
+      root.style.setProperty('--mt-text-muted', (pll.fgMuted) || muted);
+      root.style.setProperty('--mt-placeholder', muted);
       // 应用到已有面板
-      const container = document.querySelector('.container');
-      const results = document.querySelector('.results-container');
-      if (container) container.style.background = 'transparent';
-      if (results) {
-        results.style.background = 'var(--mt-panel)';
-        results.style.borderColor = 'var(--mt-border)';
-      }
-      const sbox = document.querySelector('.search-box');
-      if (sbox) {
-        sbox.style.background = 'var(--mt-panel)';
-        sbox.style.borderColor = 'var(--mt-border)';
-      }
-      const input = document.getElementById('searchInput');
-      if (input) input.style.color = 'var(--mt-fg)';
-      // 列表项前景色与图标底色
-      document.querySelectorAll('.result-title').forEach(el => el.style.color = 'var(--mt-fg)');
-      document.querySelectorAll('.result-description').forEach(el => el.style.color = 'var(--mt-text-muted)');
-      document.querySelectorAll('.result-icon').forEach(el => el.style.background = 'var(--mt-iconbg)');
+      // 仅设置变量即可，具体样式交给 CSS 使用变量
     } catch {}
   }
+
 
   getTypeDisplayName(type) {
     const typeNames = {

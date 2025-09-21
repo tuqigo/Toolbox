@@ -339,6 +339,19 @@ class MiniToolbox {
 
     this.mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'));
 
+    // 时间：2025-09-21 修改说明：在首帧前向渲染端广播当前主题，避免首次打开时主题不一致
+    try {
+      const uiConfig = this.configStore.getUIConfig();
+      const { nativeTheme } = require('electron');
+      let effective = uiConfig.theme;
+      if (uiConfig.theme === 'system') {
+        effective = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+      }
+      this.mainWindow.webContents.once('dom-ready', async () => {
+        try { await this.applyThemeToWindows(uiConfig.theme, effective); } catch {}
+      });
+    } catch {}
+
     // 设置拖拽区域
     this.setupWindowDragging();
 
@@ -917,7 +930,7 @@ class MiniToolbox {
       const pid = getPluginIdFromEvent(event);
       const meta = pid && this.pluginManager.get(pid);
       
-      // 对于配置API，允许所有插件访问，不进行严格的插件ID验证
+      // 对于配置API放宽来源校验；ui.* 仍仅限插件侧调用
       const isConfigAPI = channel && channel.startsWith('config.');
       
       

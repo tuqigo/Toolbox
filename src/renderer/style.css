@@ -36,11 +36,11 @@ body {
 .search-box {
     width: 100%;
     max-width: var(--plugin-list-width);
-    background: rgba(255, 255, 255, 0.95);
+    background: var(--mt-panel, rgba(255, 255, 255, 0.95));
     backdrop-filter: blur(20px);
     border-radius: 12px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: 1px solid var(--mt-border, rgba(255, 255, 255, 0.2));
     overflow: hidden;
     transition: all 0.3s ease;
 }
@@ -216,7 +216,7 @@ body {
     border: none;
     outline: none;
     background: transparent;
-    color: #333;
+    color: var(--mt-fg, #333);
     min-width: 0; /* 允许压缩 */
 }
 
@@ -226,7 +226,7 @@ body {
 }
 
 #searchInput::placeholder {
-    color: #999;
+    color: var(--mt-placeholder, #999);
 }
 
 .input-type-indicator {
@@ -253,11 +253,11 @@ body {
     width: 100%;
     max-width: var(--plugin-list-width);
     margin-top: 8px;
-    background: rgba(255, 255, 255, 0.95);
+    background: var(--mt-panel, rgba(255, 255, 255, 0.95));
     backdrop-filter: blur(20px);
     border-radius: 12px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: 1px solid var(--mt-border, rgba(255, 255, 255, 0.2));
     overflow: hidden;
     animation: slideDown 0.2s ease;
 }
