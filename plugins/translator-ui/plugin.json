@@ -1,0 +1,25 @@
+{
+  "name": "翻译",
+  "description": "智能翻译（中文→英文；非中文→中文）",
+  "logo": "🌐",
+  "instance": "multi",
+  "window": {
+    "width": 700,
+    "height": 520,
+    "resizable": true,
+    "hideOnBlur": false
+  },
+  "features": [
+    {
+      "code": "translate.ui",
+      "explain": "打开翻译",
+      "cmds": [
+        { "type": "keyword", "value": "翻译" },
+        { "type": "keyword", "value": "fy" },
+        { "type": "regex", "match": "/[A-Za-z\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/", "flags": "i", "minLength": 1 }
+      ]
+    }
+  ]
+}
+
+
