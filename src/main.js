@@ -590,6 +590,8 @@ class MiniToolbox {
     if (this.mainWindow) {
       this.mainWindow.webContents.send('plugins-reloaded');
     }
+
+    this.registerPluginShortcuts(); // 2025-09-24: 新增 - 重载后刷新插件快捷键
   }
 
   // 插件执行
@@ -2045,6 +2047,48 @@ class MiniToolbox {
     }
   }
 
+  // 2025-09-24: 新增 - 插件级全局快捷键注册（features[].shortcut）
+  registerPluginShortcuts() {
+    try {
+      // 卸载旧的插件快捷键，避免重复注册
+      if (!this._pluginShortcutList) this._pluginShortcutList = [];
+      for (const acc of this._pluginShortcutList) {
+        try { globalShortcut.unregister(acc); } catch {}
+      }
+      this._pluginShortcutList = [];
+
+      const plugins = this.pluginManager.list();
+      for (const p of plugins) {
+        const list = Array.isArray(p.featureShortcuts) ? p.featureShortcuts : [];
+        for (const sc of list) {
+          const acc = sc.accelerator;
+          if (!acc) continue;
+          const ok = globalShortcut.register(acc, () => {
+            // 通过 executePlugin 直达指定 feature（不回填输入框，避免闪烁）
+            const inputData = {
+              content: '',
+              type: 'text',
+              length: 0,
+              lines: 0,
+              timestamp: Date.now(),
+              featureCode: sc.featureCode
+            };
+            try { this.hideMainWindow(); } catch {}
+            this.executePlugin(p.id, inputData);
+          });
+          if (ok) {
+            this._pluginShortcutList.push(acc);
+            if (!this.isQuiet) console.log(`[快捷键] ${acc} → ${p.id}#${sc.featureCode}`);
+          } else {
+            console.error(`[快捷键] 注册失败: ${acc} (${p.id}/${sc.featureCode})`);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('注册插件级快捷键时出错:', e && e.message || e);
+    }
+  }
+
   async toggleClipboardAutoFill() {
     const newState = await this.configStore.toggleClipboardAutoFill();
     console.log(`剪贴板自动填充已${newState ? '启用' : '禁用'}`);
@@ -2267,6 +2311,7 @@ class MiniToolbox {
       this.registerGlobalShortcuts();
       await this.loadPlugins();
       this.matcher.rebuild(this.pluginManager.list());
+      this.registerPluginShortcuts(); // 2025-09-24: 新增 - 注册插件级快捷键
       this.setupIpcHandlers();
       
       // 在主窗口创建后应用配置中的设置
