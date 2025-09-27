@@ -13,6 +13,7 @@
     {
       "code": "clipboard.history",
       "explain": "剪贴板历史",
+      "shortcut": "Alt+Shift+V",
       "cmds": [
         {
           "type": "keyword",

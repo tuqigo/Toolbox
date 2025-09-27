@@ -89,6 +89,8 @@ class PluginManager {
     // copyEnabled 默认关闭；仅显式 true 时开启
     const defaultCopyEnabled = manifest.copyEnabled === true;
     const featuresMap = {};
+    // 2025-09-24: 新增 支持 feature 级快捷键声明；将 manifest.features[].shortcut 收集至此
+    const featureShortcuts = [];
     for (const f of features) {
       if (!f || typeof f !== 'object' || !f.code) continue;
       const effective = {
@@ -101,6 +103,13 @@ class PluginManager {
         placeholder: f.placeholder || ''
       };
       featuresMap[f.code] = effective;
+
+      // 2025-09-24: 新增 - 收集每个 feature 定义的快捷键（Electron accelerator 格式）
+      try {
+        if (typeof f.shortcut === 'string' && f.shortcut.trim()) {
+          featureShortcuts.push({ accelerator: f.shortcut.trim(), featureCode: f.code });
+        }
+      } catch {}
     }
 
     // 解析图标：兼容 emoji / URL / 相对路径文件（svg/png/...）
@@ -154,7 +163,9 @@ class PluginManager {
       // 顶层默认（作为继承兜底）
       defaultMode,
       defaultCopyField,
-      defaultCopyEnabled
+      defaultCopyEnabled,
+      // 2025-09-24: 新增 - 暴露解析到的 feature 快捷键（供主进程注册使用）
+      featureShortcuts
     };
 
     this.plugins.set(id, meta);

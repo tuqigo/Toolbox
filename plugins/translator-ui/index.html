@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>翻译</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <style>
+    :root{
+      --bg:#111;--panel:#1e1f24;--fg:#e6e7ea;--muted:#9aa3b2;--primary:#4f8cff;--border:#2f3136;
+      --radius:10px;--space:16px;--font:ui-sans-serif,-apple-system,Segoe UI,Roboto,Helvetica,Arial,PingFang SC,Microsoft Yahei,sans-serif;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 var(--font);
+      display:flex;align-items:center;justify-content:center;
+    }
+    .card{
+      width:min(680px,92vw);background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+      box-shadow:0 8px 24px rgba(0,0,0,.35);padding:18px 18px 14px;
+    }
+    .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .title{font-weight:600}
+    .chips{display:flex;gap:8px}
+    .chip{
+      padding:6px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer;color:var(--muted);
+      user-select:none;transition:.15s;
+    }
+    .chip.active{background:var(--primary);color:#fff;border-color:transparent}
+    .row{display:flex;gap:12px}
+    .col{flex:1;display:flex;flex-direction:column;gap:8px}
+    .label{font-size:12px;color:var(--muted)}
+    textarea{
+      width:100%;min-height:160px;max-height:320px;resize:vertical;border-radius:8px;border:1px solid var(--border);
+      padding:10px;background:#0f1113;color:var(--fg);outline:none;
+    }
+    .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+    .btn{
+      appearance:none;border:1px solid var(--border);background:transparent;color:var(--fg);padding:8px 12px;border-radius:8px;cursor:pointer;
+    }
+    .btn.primary{background:var(--primary);border-color:transparent;color:#fff}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .hint{color:var(--muted);font-size:12px;margin-top:6px}
+    .toast{
+      position:fixed;right:16px;bottom:16px;background:#1c1f24;border:1px solid var(--border);color:var(--fg);
+      padding:10px 12px;border-radius:8px;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none;
+    }
+    .toast.show{opacity:1;transform:none}
+  </style>
+  <script>
+    // 禁止拖放外部文件
+    document.addEventListener('dragover', e=>e.preventDefault());
+    document.addEventListener('drop', e=>e.preventDefault());
+  </script>
+  <script defer src="./script.js"></script>
+  <link rel="preconnect" href="https://translate.googleapis.com">
+  <link rel="preconnect" href="https://api.mymemory.translated.net">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="title">翻译</div>
+      <div class="chips">
+        <div class="chip" id="chipZh">译为中文</div>
+        <div class="chip" id="chipEn">译为英文</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="col">
+        <div class="label">原文</div>
+        <textarea id="src" placeholder="输入或粘贴文本..."></textarea>
+        <div class="hint" id="det">检测语言：-</div>
+      </div>
+      <div class="col">
+        <div class="label">译文</div>
+        <textarea id="dst" placeholder="译文将显示在这里..." readonly></textarea>
+        <div class="actions">
+          <button class="btn" id="btnSwap">切换方向</button>
+          <button class="btn" id="btnCopy">复制译文</button>
+          <button class="btn primary" id="btnTrans">翻译</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+</body>
+</html>
+
+
