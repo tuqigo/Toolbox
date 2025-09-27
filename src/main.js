@@ -174,6 +174,7 @@ class MiniToolbox {
     // 从配置中获取当前设置
     const uiConfig = this.configStore.getUIConfig();
     const clipboardConfig = this.configStore.getClipboardConfig();
+    const appConfig = this.configStore.getAppConfig(); // 时间：2025-09-27 修改说明：读取应用配置（开机自启）
     
     const contextMenu = Menu.buildFromTemplate([
       { label: '切换输入框', click: () => this.toggleInputWindow() },
@@ -193,6 +194,17 @@ class MiniToolbox {
           { label: '跟随系统', type: 'radio', checked: uiConfig.theme === 'system', click: () => this.setTheme('system') },
           { label: '明亮', type: 'radio', checked: uiConfig.theme === 'light', click: () => this.setTheme('light') },
           { label: '暗黑', type: 'radio', checked: uiConfig.theme === 'dark', click: () => this.setTheme('dark') }
+        ]
+      },
+      {
+        label: '系统',
+        submenu: [
+          {
+            label: '开机自启',
+            type: 'checkbox',
+            checked: !!appConfig.autoLaunch,
+            click: () => this.toggleAutoLaunch()
+          }
         ]
       },
       { 
@@ -242,6 +254,56 @@ class MiniToolbox {
     this.tray.on('click', () => {
       this.toggleInputWindow();
     });
+  }
+
+  // 时间：2025-09-27 修改说明：新增 - 应用开机自启到系统（Windows/macOS）
+  async applyAutoLaunch(enabled) {
+    try {
+      const want = !!enabled;
+      if (typeof app.setLoginItemSettings === 'function') {
+        if (process.platform === 'win32') {
+          // Windows：明确指定 path/args，默认路径为当前可执行
+          const exePath = process.execPath;
+          const args = [];
+          app.setLoginItemSettings({ openAtLogin: want, path: exePath, args });
+        } else {
+          // 其他平台：最小化设置
+          app.setLoginItemSettings({ openAtLogin: want });
+        }
+      }
+      console.log(`[自启] 系统登录项已${want ? '启用' : '关闭'}`);
+      return true;
+    } catch (e) {
+      console.error('[自启] 应用到系统失败:', e && e.message || e);
+      return false;
+    }
+  }
+
+  // 时间：2025-09-27 修改说明：新增 - 切换开机自启（更新配置并同步系统）
+  async toggleAutoLaunch() {
+    try {
+      const val = await this.configStore.toggleAutoLaunch();
+      await this.applyAutoLaunch(val);
+      this.updateTrayMenu();
+      return val;
+    } catch (e) {
+      console.error('[自启] 切换失败:', e && e.message || e);
+      return null;
+    }
+  }
+
+  // 时间：2025-09-27 修改说明：新增 - 启动时同步自启设置（仅打包版生效）
+  async syncAutoLaunchFromConfig() {
+    try {
+      const { autoLaunch } = this.configStore.getAppConfig();
+      if (this.isDev) {
+        console.log(`[自启] 开发模式跳过系统写入（期望=${autoLaunch}）`);
+        return;
+      }
+      await this.applyAutoLaunch(!!autoLaunch);
+    } catch (e) {
+      console.error('[自启] 启动同步失败:', e && e.message || e);
+    }
   }
 
   // 解析插件图标为可用的 file:// URL（仅当 manifest.logo 指向文件时）
@@ -2326,6 +2388,8 @@ class MiniToolbox {
       this.matcher.rebuild(this.pluginManager.list());
       this.registerPluginShortcuts(); // 2025-09-24: 新增 - 注册插件级快捷键
       this.setupIpcHandlers();
+      // 时间：2025-09-27 修改说明：启动时同步自启设置到系统
+      await this.syncAutoLaunchFromConfig();
       
       // 在主窗口创建后应用配置中的设置
       await this.applyConfigOnStartup();

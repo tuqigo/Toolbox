@@ -13,6 +13,10 @@ class ConfigStore {
 
   getDefaultConfig() {
     return {
+      // 时间：2025-09-27 修改说明：新增应用级配置项（开机自启）
+      app: {
+        autoLaunch: false // 是否随系统启动
+      },
       // 剪贴板相关配置
       clipboard: {
         autoFillMaxAge: 5, // 自动填充剪贴板内容的最大时间（秒）
@@ -227,6 +231,25 @@ class ConfigStore {
       compactMode: this.get('ui.compactMode', false),
       showTypeIndicator: this.get('ui.showTypeIndicator', false)
     };
+  }
+
+  // 时间：2025-09-27 修改说明：新增应用配置访问器（开机自启）
+  getAppConfig() {
+    return {
+      autoLaunch: this.get('app.autoLaunch', false)
+    };
+  }
+
+  async setAutoLaunch(enabled) {
+    const val = !!enabled;
+    await this.set('app.autoLaunch', val);
+    return val;
+  }
+
+  async toggleAutoLaunch() {
+    const cur = this.get('app.autoLaunch', false);
+    await this.set('app.autoLaunch', !cur);
+    return !cur;
   }
 
   // 设置主题
