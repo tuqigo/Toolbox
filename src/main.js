@@ -312,6 +312,16 @@ class MiniToolbox {
     }
   }
 
+  // 时间：2025-09-27 修改说明：新增 - 启动期延迟同步自启，减少首轮阻塞风险
+  syncAutoLaunchFromConfigDeferred(delayMs = 800) {
+    try {
+      const ms = Math.max(0, Number(delayMs || 0));
+      setTimeout(() => {
+        try { this.syncAutoLaunchFromConfig(); } catch {}
+      }, ms);
+    } catch {}
+  }
+
   // 时间：2025-09-27 修改说明：新增 - 显式设置开机自启
   async setAutoLaunch(enabled) {
     try {
@@ -2407,8 +2417,8 @@ class MiniToolbox {
       this.matcher.rebuild(this.pluginManager.list());
       this.registerPluginShortcuts(); // 2025-09-24: 新增 - 注册插件级快捷键
       this.setupIpcHandlers();
-      // 时间：2025-09-27 修改说明：启动时同步自启设置到系统
-      await this.syncAutoLaunchFromConfig();
+      // 时间：2025-09-27 修改说明：将启动期自启同步改为延迟执行，避免首次托盘右键卡顿
+      this.syncAutoLaunchFromConfigDeferred(1200);
       
       // 在主窗口创建后应用配置中的设置
       await this.applyConfigOnStartup();
