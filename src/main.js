@@ -200,10 +200,16 @@ class MiniToolbox {
         label: '系统',
         submenu: [
           {
-            label: '开机自启',
-            type: 'checkbox',
-            checked: !!appConfig.autoLaunch,
-            click: () => this.toggleAutoLaunch()
+            label: '开启自启',
+            type: 'radio',
+            checked: appConfig.autoLaunch === true,
+            click: () => this.setAutoLaunch(true)
+          },
+          {
+            label: '关闭自启',
+            type: 'radio',
+            checked: !appConfig.autoLaunch,
+            click: () => this.setAutoLaunch(false)
           }
         ]
       },
@@ -303,6 +309,19 @@ class MiniToolbox {
       await this.applyAutoLaunch(!!autoLaunch);
     } catch (e) {
       console.error('[自启] 启动同步失败:', e && e.message || e);
+    }
+  }
+
+  // 时间：2025-09-27 修改说明：新增 - 显式设置开机自启
+  async setAutoLaunch(enabled) {
+    try {
+      const saved = await this.configStore.setAutoLaunch(!!enabled);
+      await this.applyAutoLaunch(saved);
+      this.updateTrayMenu();
+      return saved;
+    } catch (e) {
+      console.error('[自启] 设置失败:', e && e.message || e);
+      return null;
     }
   }
 
